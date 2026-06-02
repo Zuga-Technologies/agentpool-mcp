@@ -68,6 +68,22 @@ def test_fail_vote_sinks_score(conn):
     assert score == 0.0  # +1 then -1
 
 
+def test_purge_all_keeps_anon(conn):
+    db.ensure_anon_account(conn)
+    acct = _mk_account(conn, "grace")
+    eid = db.insert_entry(conn, "p", "s", [], "", acct["id"], acct["tier"], _vec(7))
+    db.record_confirmation(conn, eid, acct["id"], True, 1)
+    counts = db.purge_all(conn)
+    assert counts["entries"] == 1
+    assert db.get_entry(conn, eid) is None
+    assert db.get_account_by_handle(conn, "grace") is None
+    # anon system account survives
+    from agentpool import ANON_HANDLE
+    assert db.get_account_by_handle(conn, ANON_HANDLE) is not None
+    # vec table emptied — a fresh insert reuses the space without KNN errors
+    assert db.knn(conn, _vec(7), n=5) == []
+
+
 def test_remove_by_tier_since(conn):
     acct = _mk_account(conn, "frank", "free")
     eid = db.insert_entry(conn, "p", "s", [], "", acct["id"], acct["tier"], _vec(4))

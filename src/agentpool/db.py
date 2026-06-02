@@ -232,3 +232,19 @@ def remove_entries_by_tier_since(conn, tier: str, since_iso: str) -> int:
     )
     conn.commit()
     return cur.rowcount
+
+
+def purge_all(conn) -> dict:
+    """Wipe all pool content + non-anon accounts. Pre-launch / hard-reset only."""
+    from . import ANON_HANDLE
+
+    counts = {
+        "confirmations": conn.execute("DELETE FROM confirmations").rowcount,
+        "entries_vec": conn.execute("DELETE FROM entries_vec").rowcount,
+        "entries": conn.execute("DELETE FROM entries").rowcount,
+        "accounts": conn.execute(
+            "DELETE FROM accounts WHERE handle != ?", (ANON_HANDLE,)
+        ).rowcount,
+    }
+    conn.commit()
+    return counts

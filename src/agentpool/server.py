@@ -252,6 +252,40 @@ async def register_route(request: Request) -> JSONResponse:
     )
 
 
+def _admin_ok(request: Request) -> bool:
+    return request.headers.get("x-admin-token") == config.ADMIN_TOKEN
+
+
+@mcp.custom_route("/admin/reset", methods=["POST"])
+async def admin_reset(request: Request) -> JSONResponse:
+    """Hard-reset the pool (wipe all content + non-anon accounts). Token-gated."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    conn = db.connect()
+    try:
+        counts = db.purge_all(conn)
+        db.ensure_anon_account(conn)
+    finally:
+        conn.close()
+    return JSONResponse({"reset": counts})
+
+
+@mcp.custom_route("/admin/purge_tier", methods=["POST"])
+async def admin_purge_tier(request: Request) -> JSONResponse:
+    """Soft-remove entries of a tier since a timestamp (cohort poison cleanup)."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.json()
+    tier = body.get("tier", "free")
+    since = body.get("since", "1970-01-01T00:00:00+00:00")
+    conn = db.connect()
+    try:
+        n = db.remove_entries_by_tier_since(conn, tier, since)
+    finally:
+        conn.close()
+    return JSONResponse({"removed": n, "tier": tier, "since": since})
+
+
 def main() -> None:
     mcp.run(transport="http", host=config.HOST, port=config.PORT, path="/mcp")
 
