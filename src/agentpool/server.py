@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from . import auth, db
 from . import config
-from . import ranking, render
+from . import guard, ranking, render
 from .embeddings import embed
 
 mcp = FastMCP("AgentPool")
@@ -105,6 +105,12 @@ def post_solution(
         if not problem.strip() or not solution.strip():
             raise ToolError("both problem and solution are required")
         _rate_limit(conn, account["id"], "post")
+        allowed, reason = guard.screen_post(problem, solution)
+        if not allowed:
+            raise ToolError(
+                f"rejected by content shield -- {reason}. "
+                "Remove the offending content and repost."
+            )
         entry_id = db.insert_entry(
             conn,
             problem_text=problem.strip(),

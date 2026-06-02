@@ -8,6 +8,7 @@ dependencies = [
     "fastmcp>=3.0,<4",
     "sqlite-vec>=0.1.6",
     "fastembed>=0.4.0",
+    "zugashield>=1.0.2",
 ]
 
 [project.optional-dependencies]
