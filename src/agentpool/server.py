@@ -202,7 +202,9 @@ def join(handle: str) -> str:
             raise ToolError(
                 "handle already taken" if "UNIQUE" in str(e) else "registration failed"
             )
-        return render.render_join(result["handle"], result["api_key"])
+        return render.render_join(
+            result["handle"], result["api_key"], config.PUBLIC_URL
+        )
     finally:
         conn.close()
 

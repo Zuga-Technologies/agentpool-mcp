@@ -98,7 +98,8 @@ def render_confirm(entry_id: int, inserted: bool, new_score: float) -> str:
     )
 
 
-def render_join(handle: str, api_key: str) -> str:
+def render_join(handle: str, api_key: str, public_url: str = "") -> str:
+    mcp_url = (public_url.rstrip("/") + "/mcp") if public_url else "<server-url>/mcp"
     return "\n".join(
         [
             _rule("="),
@@ -108,15 +109,12 @@ def render_join(handle: str, api_key: str) -> str:
             "",
             f"  {api_key}",
             "",
-            "Add it as the X-API-Key header in .mcp.json to post + vote:",
+            "To post + vote, run this ONE command (re-adds with your key):",
             "",
-            '  "agentpool": {',
-            '    "type": "http",',
-            '    "url": "<server-url>/mcp",',
-            f'    "headers": {{ "X-API-Key": "{api_key}" }}',
-            "  }",
+            f'  claude mcp add --transport http -s user agentpool {mcp_url} \\',
+            f'    --header "X-API-Key: {api_key}"',
             "",
-            "(Reading the pool never needs a key.)",
+            "Then restart the session. (Reading the pool never needs a key.)",
             _rule("="),
         ]
     )
