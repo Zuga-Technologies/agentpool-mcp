@@ -290,47 +290,56 @@ async def cq_node(request: Request) -> JSONResponse:
     return JSONResponse(cq.node_document(config.PUBLIC_URL))
 
 
+# Routing mirrors cq's actual FastAPI source (server/backend/.../routes/
+# knowledge.py), verified 2026-06-01:
+#   query   = GET  /api/v1/knowledge            (domains/languages/frameworks/limit)
+#   propose = POST /api/v1/knowledge            (201)
+#   stats   = GET  /api/v1/knowledge/stats
+#   confirm = POST /api/v1/knowledge/{unit_id}/confirmations  (201)
+#   flag    = POST /api/v1/knowledge/{unit_id}/flags          (201)
+# cq excludes created_by from query/confirm/flag responses; we mirror that.
+
+def _ku_public(ku: dict) -> dict:
+    ku = dict(ku)
+    ku.pop("created_by", None)
+    return ku
+
+
 @mcp.custom_route("/api/v1/knowledge", methods=["GET"])
-async def cq_knowledge(request: Request) -> JSONResponse:
-    limit = max(1, min(int(request.query_params.get("limit", 50)), 200))
-    offset = max(0, int(request.query_params.get("offset", 0)))
+async def cq_query_units(request: Request) -> JSONResponse:
+    qp = request.query_params
+    domains = qp.getlist("domains")
+    langs = qp.getlist("languages")
+    fws = qp.getlist("frameworks")
+    try:
+        limit = max(1, min(int(qp.get("limit", 5)), 50))
+    except ValueError:
+        limit = 5
+    text = " ".join([*domains, *langs, *fws]).strip()
     conn = db.connect()
     try:
-        rows = db.list_active(conn, limit=limit, offset=offset)
-    finally:
-        conn.close()
-    kus = [cq.entry_to_ku(dict(r), config.PUBLIC_URL) for r in rows]
-    next_cursor = str(offset + limit) if len(rows) == limit else None
-    return JSONResponse({"data": kus, "next_cursor": next_cursor})
-
-
-@mcp.custom_route("/api/v1/query", methods=["POST"])
-async def cq_query(request: Request) -> JSONResponse:
-    body = await request.json()
-    domains = body.get("domains") or []
-    free = body.get("query") or body.get("q") or ""
-    limit = max(1, min(int(body.get("limit", 5)), 50))
-    text = " ".join([*domains, free]).strip()
-    if not text:
-        return JSONResponse({"error": "domains or query required"}, status_code=400)
-    conn = db.connect()
-    try:
-        cands = db.knn(conn, embed(text), n=max(20, limit))
-        rows = db.fetch_entries(conn, [c for c, _ in cands])
-        ranked = []
-        for cid, dist in cands:
-            r = rows.get(cid)
-            if r is None or r["status"] != "active":
-                continue
-            ranked.append((dict(r), ranking.final_rank(dist, r["score"], r["created_at"])))
-        ranked.sort(key=lambda t: t[1], reverse=True)
-        kus = [cq.entry_to_ku(r, config.PUBLIC_URL) for r, _ in ranked[:limit]]
+        if text:
+            cands = db.knn(conn, embed(text), n=max(20, limit))
+            rows = db.fetch_entries(conn, [c for c, _ in cands])
+            ranked = []
+            for cid, dist in cands:
+                r = rows.get(cid)
+                if r is None or r["status"] != "active":
+                    continue
+                ranked.append(
+                    (dict(r), ranking.final_rank(dist, r["score"], r["created_at"]))
+                )
+            ranked.sort(key=lambda t: t[1], reverse=True)
+            selected = [r for r, _ in ranked[:limit]]
+        else:
+            selected = [dict(r) for r in db.list_active(conn, limit=limit)]
+        kus = [_ku_public(cq.entry_to_ku(r, config.PUBLIC_URL)) for r in selected]
     finally:
         conn.close()
     return JSONResponse({"data": kus, "next_cursor": None})
 
 
-@mcp.custom_route("/api/v1/propose", methods=["POST"])
+@mcp.custom_route("/api/v1/knowledge", methods=["POST"])
 async def cq_propose(request: Request) -> JSONResponse:
     account = _http_account(request)
     if account is None:
@@ -373,43 +382,70 @@ async def cq_propose(request: Request) -> JSONResponse:
     return JSONResponse(ku, status_code=201)
 
 
-@mcp.custom_route("/api/v1/confirm", methods=["POST"])
+@mcp.custom_route("/api/v1/knowledge/stats", methods=["GET"])
+async def cq_stats(request: Request) -> JSONResponse:
+    conn = db.connect()
+    try:
+        rows = db.list_active(conn, limit=200)
+        total = conn.execute(
+            "SELECT COUNT(*) FROM entries WHERE status='active'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    domain_counts: dict[str, int] = {}
+    recent = []
+    for r in rows:
+        ku = cq.entry_to_ku(dict(r), config.PUBLIC_URL)
+        for d in ku["domains"]:
+            domain_counts[d] = domain_counts.get(d, 0) + 1
+        if len(recent) < 10:
+            recent.append(ku)
+    return JSONResponse(cq.stats_document(total, domain_counts, recent))
+
+
+@mcp.custom_route("/api/v1/knowledge/{unit_id}/confirmations", methods=["POST"])
 async def cq_confirm(request: Request) -> JSONResponse:
     account = _http_account(request)
     if account is None:
         return JSONResponse({"error": "X-API-Key required"}, status_code=401)
-    body = await request.json()
+    unit_id = request.path_params["unit_id"]
     conn = db.connect()
     try:
-        row = db.get_entry_by_ku(conn, body.get("id", ""))
+        row = db.get_entry_by_ku(conn, unit_id)
         if row is None:
-            return JSONResponse({"error": "unknown KU id"}, status_code=404)
+            return JSONResponse({"error": "unknown unit_id"}, status_code=404)
         weight = ranking.voter_weight(account["tier"])
         _, score = db.record_confirmation(conn, row["id"], account["id"], True, weight)
     finally:
         conn.close()
-    return JSONResponse({"id": body.get("id"), "score": score})
+    return JSONResponse({"unit_id": unit_id, "score": score}, status_code=201)
 
 
-@mcp.custom_route("/api/v1/flag", methods=["POST"])
+@mcp.custom_route("/api/v1/knowledge/{unit_id}/flags", methods=["POST"])
 async def cq_flag(request: Request) -> JSONResponse:
     account = _http_account(request)
     if account is None:
         return JSONResponse({"error": "X-API-Key required"}, status_code=401)
-    body = await request.json()
+    unit_id = request.path_params["unit_id"]
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
     reason = body.get("reason", "incorrect")
     conn = db.connect()
     try:
-        row = db.get_entry_by_ku(conn, body.get("id", ""))
+        row = db.get_entry_by_ku(conn, unit_id)
         if row is None:
-            return JSONResponse({"error": "unknown KU id"}, status_code=404)
+            return JSONResponse({"error": "unknown unit_id"}, status_code=404)
         # 'incorrect' down-ranks via a fail vote; other reasons just acknowledge.
         if reason == "incorrect":
             weight = ranking.voter_weight(account["tier"])
             db.record_confirmation(conn, row["id"], account["id"], False, weight)
     finally:
         conn.close()
-    return JSONResponse({"id": body.get("id"), "reason": reason, "flagged": True})
+    return JSONResponse(
+        {"unit_id": unit_id, "reason": reason, "flagged": True}, status_code=201
+    )
 
 
 def _admin_ok(request: Request) -> bool:

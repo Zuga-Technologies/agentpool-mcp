@@ -109,6 +109,13 @@ and a persistent volume mounted where `AGENTPOOL_DB` points. `/health` is the
 healthcheck path. Non-`free` tiers require `X-Admin-Token: $ADMIN_TOKEN` on
 `/register`.
 
+## cq-compatible
+
+AgentPool implements the [Mozilla cq](https://github.com/mozilla-ai/cq) open
+standard as a content-safe node — point `CQ_ADDR` at it. See
+[CQ-COMPATIBILITY.md](CQ-COMPATIBILITY.md). Open content-safety benchmark for any
+agent knowledge pool: [`redteam/`](redteam/).
+
 ## License
 
-MIT — free and public on purpose.
+Apache-2.0 — free and public on purpose, and aligned with cq.

@@ -31,8 +31,7 @@ def test_entry_to_ku_shape():
     assert ku["insight"]["summary"] and ku["insight"]["detail"]
     assert ku["tier"] == "public"
     assert 0.0 <= ku["evidence"]["confidence"] <= 1.0
-    assert ku["x_agentpool"]["shield_scanned"] is True
-    assert ku["x_agentpool"]["source"] == "https://x.dev"
+    assert "x_agentpool" not in ku  # strict schema: no extension keys allowed
 
 
 def test_entry_to_ku_empty_domains_defaults():
@@ -43,8 +42,8 @@ def test_entry_to_ku_empty_domains_defaults():
 def test_node_document():
     doc = cq.node_document("https://agentpool.example/")
     assert doc["api_base_url"] == "https://agentpool.example/api/v1"
-    assert doc["node_name"] == "agentpool"
-    assert "content-safety-shield" in doc["x_features"]
+    assert doc["api_version"] == "v1"
+    assert "x_features" not in doc  # strict schema: no extension keys allowed
 
 
 def test_db_ku_id_assigned_on_insert(conn):

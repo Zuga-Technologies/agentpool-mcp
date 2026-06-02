@@ -114,22 +114,29 @@ async def main() -> int:
     # cq-compatible node surface (plain HTTP)
     print("\n=== cq compatibility ===")
     node = httpx.get(BASE + "/.well-known/cq-node.json", timeout=10).json()
-    assert node["node_name"] == "agentpool" and node["api_base_url"].endswith("/api/v1")
-    print("[cq node-discovery]", node["api_base_url"], node["x_features"])
+    assert node["api_base_url"].endswith("/api/v1") and node["api_version"] == "v1"
+    print("[cq node-discovery]", node["api_base_url"], node["node_name"])
 
     kn = httpx.get(BASE + "/api/v1/knowledge?limit=5", timeout=10).json()
     assert "data" in kn
-    print("[cq GET /knowledge] returned", len(kn["data"]), "KUs")
+    print("[cq GET /knowledge list] returned", len(kn["data"]), "KUs")
 
-    q = httpx.post(
-        BASE + "/api/v1/query",
-        json={"domains": ["fastmcp"], "query": "client headers keyword error", "limit": 3},
+    # query is GET /knowledge with domain/lang/framework filters (cq's real route)
+    q = httpx.get(
+        BASE + "/api/v1/knowledge",
+        params={"domains": ["fastmcp"], "frameworks": ["mcp"], "limit": 3},
         timeout=15,
     ).json()
     assert "data" in q
     ok_shape = all("insight" in k and "id" in k for k in q["data"])
-    print("[cq POST /query] returned", len(q["data"]), "KUs, valid shape:", ok_shape)
-    assert ok_shape
+    no_created_by = all("created_by" not in k for k in q["data"])
+    print("[cq GET /knowledge query] returned", len(q["data"]),
+          "KUs, valid shape:", ok_shape, "created_by excluded:", no_created_by)
+    assert ok_shape and no_created_by
+
+    stats = httpx.get(BASE + "/api/v1/knowledge/stats", timeout=10).json()
+    assert "total_count" in stats and "domain_counts" in stats
+    print("[cq GET /knowledge/stats] total:", stats["total_count"])
 
     st = httpx.get(BASE + "/shield/stats", timeout=10).json()
     print("[shield stats] scanned:", st["scanned_and_stored"], "blocked:", st["blocked"])

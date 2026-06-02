@@ -38,51 +38,59 @@ def entry_to_ku(entry: dict, public_url: str = "") -> dict:
     score = float(entry.get("score", 0) or 0)
     confidence = round(score / (score + 3.0), 3) if score > 0 else 0.5
 
-    ku = {
+    # STRICT: knowledge_unit.json declares additionalProperties=false, so the KU
+    # must contain ONLY spec fields. AgentPool-specific signals (shield verdict,
+    # provenance) are exposed out-of-band via /shield/stats, never inside a KU.
+    return {
         "id": entry.get("ku_id") or ku_id_for(entry["id"]),
+        "version": 1,
         "domains": tags or ["general"],
         "insight": {
             "summary": _clip(entry["problem_text"], 200),
             "detail": entry["problem_text"],
             "action": entry["solution_text"],
         },
-        "version": 1,
-        "tier": "public",
         "context": {
             "languages": [],
             "frameworks": [],
             "pattern": entry.get("error_signature", "") or "",
         },
-        "evidence": {
-            "confidence": confidence,
-            "confirmations": max(1, confirms),
-            "first_observed": entry.get("created_at", ""),
-            "last_confirmed": entry.get("created_at", ""),
-        },
-        "created_by": f"agentpool:{entry.get('author_tier', entry.get('tier',''))}",
-        # AgentPool extensions (namespaced so they don't collide with the spec):
-        "x_agentpool": {
-            "entry_id": entry["id"],
-            "provenance_tier": entry.get("tier", ""),
-            "shield_verdict": entry.get("shield_verdict", "") or "allow",
-            "shield_scanned": True,
-        },
+        "evidence": _evidence(confidence, confirms, entry.get("created_at", "")),
+        "tier": "public",
+        "created_by": f"agentpool:{entry.get('tier', '')}",
+        "flags": [],
     }
-    if public_url:
-        ku["x_agentpool"]["source"] = public_url.rstrip("/")
-    return ku
+
+
+def _evidence(confidence: float, confirms: int, created_at: str) -> dict:
+    ev = {"confidence": confidence, "confirmations": max(1, confirms)}
+    if created_at:  # date-time fields omitted when unknown (schema is strict)
+        ev["first_observed"] = created_at
+        ev["last_confirmed"] = created_at
+    return ev
 
 
 def node_document(public_url: str) -> dict:
-    """The /.well-known/cq-node.json discovery document."""
-    base = public_url.rstrip("/") if public_url else ""
+    """The /.well-known/cq-node.json discovery document.
+
+    node_discovery.json declares additionalProperties=false, so ONLY the spec
+    fields are allowed (version/api_base_url/api_version/node_name).
+    """
+    base = public_url.rstrip("/") if public_url else "http://localhost:8000"
     return {
         "version": 1,
         "api_base_url": f"{base}/api/v1",
         "api_version": "v1",
-        "node_name": "agentpool",
-        # Non-spec advertisement of what makes this node distinct.
-        "x_features": ["semantic-search", "content-safety-shield", "open-write"],
+        "node_name": "AgentPool",
+    }
+
+
+def stats_document(total: int, domain_counts: dict, recent_kus: list) -> dict:
+    """cq /stats response shape (stats.json)."""
+    return {
+        "total_count": total,
+        "domain_counts": domain_counts,
+        "recent": recent_kus,
     }
 
 

@@ -9,10 +9,30 @@ verdict always rejects — a known attack never gets stored.
 """
 import asyncio
 import logging
+import re
 import uuid
 from functools import lru_cache
 
 log = logging.getLogger("agentpool.guard")
+
+# Exfiltration-instruction layer (AgentPool, on top of ZugaShield).
+# Catches "send <sensitive thing> to <network sink>" patterns where no literal
+# secret is present (so DLP doesn't fire) but the instruction tells a reading
+# agent to exfiltrate. Requires BOTH a sensitive target AND a network sink to
+# keep precision high (benign shell/env mentions don't trip it).
+_SENSITIVE = re.compile(
+    r"(~/\.ssh|id_rsa|id_ed25519|\.aws/credentials|aws_secret_access_key"
+    r"|/etc/passwd|private[ _-]?key|printenv|\benv\s*\|)",
+    re.I,
+)
+_SINK = re.compile(
+    r"(https?://|\bcurl\b|\bwget\b|\bnc\b|--data|-X\s*POST|\bupload\b|exfiltrat)",
+    re.I,
+)
+
+
+def _exfil_instruction(text: str) -> bool:
+    return bool(_SENSITIVE.search(text) and _SINK.search(text))
 
 
 @lru_cache(maxsize=1)
@@ -68,6 +88,10 @@ def screen_post(problem: str, solution: str) -> tuple[bool, str]:
     Rejects on prompt-injection in the combined text (check_prompt) or on a
     leaked secret/credential in the solution (check_output / DLP).
     """
+    # Stateless AgentPool layer first (no external dep, can't fail open).
+    if _exfil_instruction(f"{problem}\n{solution}"):
+        return False, "exfiltration instruction (sensitive target + network sink)"
+
     try:
         shield = _shield()
     except Exception as e:  # zugashield missing/broken -> fail open, but shout
