@@ -20,6 +20,10 @@ ENV PYTHONPATH=/app/src
 ENV HOST=0.0.0.0
 ENV AGENTPOOL_DB=/app/data/agentpool.db
 
+# Ensure the DB dir exists even when no volume is mounted (a mounted volume
+# at /app/data transparently overrides this with persistent storage).
+RUN mkdir -p /app/data
+
 EXPOSE 8000
 
 CMD ["python", "-m", "agentpool.server"]

@@ -1,0 +1,16 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
+.fastembed_cache/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.env
+tests/
+docs/
