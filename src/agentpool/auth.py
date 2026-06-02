@@ -30,11 +30,27 @@ class AuthError(Exception):
     """Raised when a request cannot be authenticated."""
 
 
+def extract_key(headers: dict) -> str:
+    """Pull the API key from either header.
+
+    AgentPool's native MCP clients send `X-API-Key`; cq tooling sends
+    `Authorization: Bearer <key>`. Accept both for interop.
+    """
+    h = headers or {}
+    key = (h.get("x-api-key") or "").strip()
+    if key:
+        return key
+    authz = (h.get("authorization") or "").strip()
+    if authz.lower().startswith("bearer "):
+        return authz[7:].strip()
+    return ""
+
+
 def authenticate(conn, headers: dict) -> dict:
-    """Resolve X-API-Key header to an account row. Raises AuthError otherwise."""
-    api_key = (headers or {}).get("x-api-key", "").strip()
+    """Resolve the API key (X-API-Key or Bearer) to an account. Raises otherwise."""
+    api_key = extract_key(headers)
     if not api_key:
-        raise AuthError("missing X-API-Key header")
+        raise AuthError("missing X-API-Key or Authorization: Bearer header")
     row = _db.get_account_by_key_hash(conn, hash_key(api_key))
     if row is None:
         raise AuthError("unknown API key")
@@ -49,7 +65,6 @@ def authenticate_optional(conn, headers: dict) -> dict | None:
     A present-but-invalid or banned key still raises — only the *absence* of a
     key yields None.
     """
-    api_key = (headers or {}).get("x-api-key", "").strip()
-    if not api_key:
+    if not extract_key(headers):
         return None
     return authenticate(conn, headers)

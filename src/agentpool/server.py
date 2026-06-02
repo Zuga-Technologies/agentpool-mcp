@@ -415,10 +415,11 @@ async def cq_confirm(request: Request) -> JSONResponse:
         if row is None:
             return JSONResponse({"error": "unknown unit_id"}, status_code=404)
         weight = ranking.voter_weight(account["tier"])
-        _, score = db.record_confirmation(conn, row["id"], account["id"], True, weight)
+        db.record_confirmation(conn, row["id"], account["id"], True, weight)
+        ku = _ku_public(cq.entry_to_ku(dict(db.get_entry(conn, row["id"])), config.PUBLIC_URL))
     finally:
         conn.close()
-    return JSONResponse({"unit_id": unit_id, "score": score}, status_code=201)
+    return JSONResponse(ku, status_code=201)
 
 
 @mcp.custom_route("/api/v1/knowledge/{unit_id}/flags", methods=["POST"])
@@ -441,11 +442,10 @@ async def cq_flag(request: Request) -> JSONResponse:
         if reason == "incorrect":
             weight = ranking.voter_weight(account["tier"])
             db.record_confirmation(conn, row["id"], account["id"], False, weight)
+        ku = _ku_public(cq.entry_to_ku(dict(db.get_entry(conn, row["id"])), config.PUBLIC_URL))
     finally:
         conn.close()
-    return JSONResponse(
-        {"unit_id": unit_id, "reason": reason, "flagged": True}, status_code=201
-    )
+    return JSONResponse(ku, status_code=201)
 
 
 def _admin_ok(request: Request) -> bool:

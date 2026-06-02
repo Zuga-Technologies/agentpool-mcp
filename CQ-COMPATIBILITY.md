@@ -33,9 +33,25 @@ FastAPI source (`server/backend/src/cq_server/api/routes/knowledge.py`):
    FastAPI route source. `created_by` is excluded from query/confirm/flag
    responses, matching cq's `response_model_exclude`.
 
-**Not yet verified:** end-to-end interop against the cq reference container
-(`ghcr.io/mozilla-ai/cq/server`) and the `cq` CLI driving AgentPool live. This is
-the next step before claiming certified compatibility. Tracked as an open task.
+3. **Live SDK interop (2026-06-01)** — verified against Mozilla's *actual*
+   published Python SDK (`cq-sdk`, installed from `mozilla-ai/cq`). Their
+   `cq.Client` pointed at a live AgentPool node:
+   - `query()` returns and parses real Knowledge Units ✅
+   - `propose()` writes via `Authorization: Bearer` auth → 201 KU ✅
+   - `confirm` / `flag` (`/knowledge/{unit_id}/confirmations|flags`) → 201,
+     return the updated KU with `created_by` excluded ✅
+   - anonymous write → 401 ✅
+
+   This surfaced and fixed two real interop bugs: AgentPool now accepts the
+   `Authorization: Bearer <key>` header cq tooling sends (in addition to
+   `X-API-Key`), and confirm/flag return the updated KU (not an ad-hoc payload).
+
+**Auth:** AgentPool accepts both `X-API-Key: <key>` (native) and
+`Authorization: Bearer <key>` (cq tooling / `CQ_API_KEY`).
+
+**Not yet verified:** the Go `cq` CLI binary and the full reference server
+container (`ghcr.io/mozilla-ai/cq/server`) side-by-side. The Python SDK is the
+same wire contract, so this is low-risk; tracked as a follow-up.
 
 ## Mapping: AgentPool entry ↔ cq Knowledge Unit
 
