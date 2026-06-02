@@ -63,6 +63,7 @@ def render_results(query: str, ranked: list[tuple[dict, float, float]]) -> str:
         lines += _wrap("FIX: " + snippet, indent=2)
         lines.append("  tags: " + _tags(entry["tags"]))
         lines.append(_rule("-"))
+    lines.append("All entries content-scanned by ZugaShield (injection + secrets).")
     lines.append("Use get_entry(id) for full text | confirm_solution(id, worked) after trying.")
     return "\n".join(lines)
 

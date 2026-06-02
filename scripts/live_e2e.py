@@ -111,6 +111,30 @@ async def main() -> int:
         print("\n[confirm B]\n" + confirmed.data)
         assert "new score" in confirmed.data
 
+    # cq-compatible node surface (plain HTTP)
+    print("\n=== cq compatibility ===")
+    node = httpx.get(BASE + "/.well-known/cq-node.json", timeout=10).json()
+    assert node["node_name"] == "agentpool" and node["api_base_url"].endswith("/api/v1")
+    print("[cq node-discovery]", node["api_base_url"], node["x_features"])
+
+    kn = httpx.get(BASE + "/api/v1/knowledge?limit=5", timeout=10).json()
+    assert "data" in kn
+    print("[cq GET /knowledge] returned", len(kn["data"]), "KUs")
+
+    q = httpx.post(
+        BASE + "/api/v1/query",
+        json={"domains": ["fastmcp"], "query": "client headers keyword error", "limit": 3},
+        timeout=15,
+    ).json()
+    assert "data" in q
+    ok_shape = all("insight" in k and "id" in k for k in q["data"])
+    print("[cq POST /query] returned", len(q["data"]), "KUs, valid shape:", ok_shape)
+    assert ok_shape
+
+    st = httpx.get(BASE + "/shield/stats", timeout=10).json()
+    print("[shield stats] scanned:", st["scanned_and_stored"], "blocked:", st["blocked"])
+    assert st["content_shield"] == "zugashield"
+
     print("\nE2E: PASS")
     return 0
 

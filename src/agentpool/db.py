@@ -48,7 +48,16 @@ def init_db(conn: sqlite3.Connection) -> None:
             fails           REAL NOT NULL DEFAULT 0,
             score           REAL NOT NULL DEFAULT 0,
             status          TEXT NOT NULL DEFAULT 'active',
-            created_at      TEXT NOT NULL
+            created_at      TEXT NOT NULL,
+            ku_id           TEXT NOT NULL DEFAULT '',
+            shield_verdict  TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS rejected_posts (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            reason     TEXT NOT NULL,
+            tier       TEXT NOT NULL,
+            created_at TEXT NOT NULL
         );
 
         CREATE TABLE IF NOT EXISTS confirmations (
@@ -65,7 +74,24 @@ def init_db(conn: sqlite3.Connection) -> None:
         );
         """
     )
+    _migrate(conn)
     conn.commit()
+
+
+def _migrate(conn) -> None:
+    """Idempotent column adds + ku_id backfill for already-deployed DBs."""
+    from .cq import ku_id_for
+
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(entries)").fetchall()}
+    if "ku_id" not in cols:
+        conn.execute("ALTER TABLE entries ADD COLUMN ku_id TEXT NOT NULL DEFAULT ''")
+    if "shield_verdict" not in cols:
+        conn.execute(
+            "ALTER TABLE entries ADD COLUMN shield_verdict TEXT NOT NULL DEFAULT ''"
+        )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_entries_ku ON entries(ku_id)")
+    for (eid,) in conn.execute("SELECT id FROM entries WHERE ku_id = ''").fetchall():
+        conn.execute("UPDATE entries SET ku_id = ? WHERE id = ?", (ku_id_for(eid), eid))
 
 
 # ---------- accounts ----------
@@ -128,11 +154,15 @@ def insert_entry(
     author_id: int,
     tier: str,
     embedding: list[float],
+    shield_verdict: str = "allow",
 ) -> int:
+    from .cq import ku_id_for
+
     cur = conn.execute(
         """INSERT INTO entries
-           (problem_text, solution_text, tags, error_signature, author_id, tier, created_at)
-           VALUES (?,?,?,?,?,?,?)""",
+           (problem_text, solution_text, tags, error_signature, author_id, tier,
+            created_at, shield_verdict)
+           VALUES (?,?,?,?,?,?,?,?)""",
         (
             problem_text,
             solution_text,
@@ -141,15 +171,53 @@ def insert_entry(
             author_id,
             tier,
             _now(),
+            shield_verdict,
         ),
     )
     entry_id = cur.lastrowid
+    conn.execute(
+        "UPDATE entries SET ku_id = ? WHERE id = ?", (ku_id_for(entry_id), entry_id)
+    )
     conn.execute(
         "INSERT INTO entries_vec (rowid, embedding) VALUES (?, ?)",
         (entry_id, sqlite_vec.serialize_float32(embedding)),
     )
     conn.commit()
     return entry_id
+
+
+def get_entry_by_ku(conn, ku_id: str):
+    return conn.execute("SELECT * FROM entries WHERE ku_id = ?", (ku_id,)).fetchone()
+
+
+def list_active(conn, limit: int = 100, offset: int = 0) -> list:
+    return conn.execute(
+        "SELECT * FROM entries WHERE status='active' ORDER BY id DESC LIMIT ? OFFSET ?",
+        (limit, offset),
+    ).fetchall()
+
+
+def log_rejection(conn, reason: str, tier: str) -> None:
+    conn.execute(
+        "INSERT INTO rejected_posts (reason, tier, created_at) VALUES (?,?,?)",
+        (reason[:200], tier, _now()),
+    )
+    conn.commit()
+
+
+def shield_stats(conn) -> dict:
+    scanned = conn.execute(
+        "SELECT COUNT(*) FROM entries WHERE shield_verdict != ''"
+    ).fetchone()[0]
+    blocked = conn.execute("SELECT COUNT(*) FROM rejected_posts").fetchone()[0]
+    recent = conn.execute(
+        "SELECT reason, tier, created_at FROM rejected_posts ORDER BY id DESC LIMIT 10"
+    ).fetchall()
+    return {
+        "scanned_and_stored": scanned,
+        "blocked": blocked,
+        "recent_blocks": [dict(r) for r in recent],
+    }
 
 
 def get_entry(conn, entry_id: int):

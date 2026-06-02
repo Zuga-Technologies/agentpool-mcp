@@ -9,7 +9,7 @@ from starlette.responses import JSONResponse, PlainTextResponse
 
 from . import auth, db
 from . import config
-from . import guard, ranking, render
+from . import cq, guard, ranking, render
 from .embeddings import embed
 
 mcp = FastMCP("AgentPool")
@@ -107,6 +107,7 @@ def post_solution(
         _rate_limit(conn, account["id"], "post")
         allowed, reason = guard.screen_post(problem, solution)
         if not allowed:
+            db.log_rejection(conn, reason, account["tier"])
             raise ToolError(
                 f"rejected by content shield -- {reason}. "
                 "Remove the offending content and repost."
@@ -120,6 +121,7 @@ def post_solution(
             author_id=account["id"],
             tier=account["tier"],
             embedding=embed(problem + "\n" + solution),
+            shield_verdict="allow",
         )
         return render.render_posted(entry_id)
     finally:
@@ -252,6 +254,162 @@ async def register_route(request: Request) -> JSONResponse:
             "next": "add this key as the X-API-Key header in your .mcp.json",
         }
     )
+
+
+@mcp.custom_route("/shield/stats", methods=["GET"])
+async def shield_stats(request: Request) -> JSONResponse:
+    """Public transparency: how much content the shield scanned and blocked.
+
+    This is the auditable-guardrail surface cq's architecture calls for but does
+    not yet expose.
+    """
+    conn = db.connect()
+    try:
+        return JSONResponse(
+            {"node": "agentpool", "content_shield": "zugashield", **db.shield_stats(conn)}
+        )
+    finally:
+        conn.close()
+
+
+# ---------- cq-compatible node (github.com/mozilla-ai/cq) ----------
+
+def _http_account(request: Request):
+    """Resolve an HTTP request's X-API-Key to an account, or None (anonymous)."""
+    conn = db.connect()
+    try:
+        return auth.authenticate_optional(conn, dict(request.headers))
+    except auth.AuthError:
+        return None
+    finally:
+        conn.close()
+
+
+@mcp.custom_route("/.well-known/cq-node.json", methods=["GET"])
+async def cq_node(request: Request) -> JSONResponse:
+    return JSONResponse(cq.node_document(config.PUBLIC_URL))
+
+
+@mcp.custom_route("/api/v1/knowledge", methods=["GET"])
+async def cq_knowledge(request: Request) -> JSONResponse:
+    limit = max(1, min(int(request.query_params.get("limit", 50)), 200))
+    offset = max(0, int(request.query_params.get("offset", 0)))
+    conn = db.connect()
+    try:
+        rows = db.list_active(conn, limit=limit, offset=offset)
+    finally:
+        conn.close()
+    kus = [cq.entry_to_ku(dict(r), config.PUBLIC_URL) for r in rows]
+    next_cursor = str(offset + limit) if len(rows) == limit else None
+    return JSONResponse({"data": kus, "next_cursor": next_cursor})
+
+
+@mcp.custom_route("/api/v1/query", methods=["POST"])
+async def cq_query(request: Request) -> JSONResponse:
+    body = await request.json()
+    domains = body.get("domains") or []
+    free = body.get("query") or body.get("q") or ""
+    limit = max(1, min(int(body.get("limit", 5)), 50))
+    text = " ".join([*domains, free]).strip()
+    if not text:
+        return JSONResponse({"error": "domains or query required"}, status_code=400)
+    conn = db.connect()
+    try:
+        cands = db.knn(conn, embed(text), n=max(20, limit))
+        rows = db.fetch_entries(conn, [c for c, _ in cands])
+        ranked = []
+        for cid, dist in cands:
+            r = rows.get(cid)
+            if r is None or r["status"] != "active":
+                continue
+            ranked.append((dict(r), ranking.final_rank(dist, r["score"], r["created_at"])))
+        ranked.sort(key=lambda t: t[1], reverse=True)
+        kus = [cq.entry_to_ku(r, config.PUBLIC_URL) for r, _ in ranked[:limit]]
+    finally:
+        conn.close()
+    return JSONResponse({"data": kus, "next_cursor": None})
+
+
+@mcp.custom_route("/api/v1/propose", methods=["POST"])
+async def cq_propose(request: Request) -> JSONResponse:
+    account = _http_account(request)
+    if account is None:
+        return JSONResponse(
+            {"error": "X-API-Key required to propose (join for a free key)"},
+            status_code=401,
+        )
+    body = await request.json()
+    insight = body.get("insight") or {}
+    problem = (insight.get("detail") or insight.get("summary") or "").strip()
+    solution = (insight.get("action") or "").strip()
+    domains = [str(d).strip() for d in (body.get("domains") or []) if str(d).strip()]
+    if not problem or not solution:
+        return JSONResponse(
+            {"error": "insight.detail (or summary) and insight.action required"},
+            status_code=400,
+        )
+    conn = db.connect()
+    try:
+        allowed, reason = guard.screen_post(problem, solution)
+        if not allowed:
+            db.log_rejection(conn, reason, account["tier"])
+            return JSONResponse(
+                {"error": f"rejected by content shield: {reason}"}, status_code=422
+            )
+        entry_id = db.insert_entry(
+            conn,
+            problem_text=problem,
+            solution_text=solution,
+            tags=domains[:8],
+            error_signature=(body.get("context") or {}).get("pattern", ""),
+            author_id=account["id"],
+            tier=account["tier"],
+            embedding=embed(problem + "\n" + solution),
+            shield_verdict="allow",
+        )
+        ku = cq.entry_to_ku(dict(db.get_entry(conn, entry_id)), config.PUBLIC_URL)
+    finally:
+        conn.close()
+    return JSONResponse(ku, status_code=201)
+
+
+@mcp.custom_route("/api/v1/confirm", methods=["POST"])
+async def cq_confirm(request: Request) -> JSONResponse:
+    account = _http_account(request)
+    if account is None:
+        return JSONResponse({"error": "X-API-Key required"}, status_code=401)
+    body = await request.json()
+    conn = db.connect()
+    try:
+        row = db.get_entry_by_ku(conn, body.get("id", ""))
+        if row is None:
+            return JSONResponse({"error": "unknown KU id"}, status_code=404)
+        weight = ranking.voter_weight(account["tier"])
+        _, score = db.record_confirmation(conn, row["id"], account["id"], True, weight)
+    finally:
+        conn.close()
+    return JSONResponse({"id": body.get("id"), "score": score})
+
+
+@mcp.custom_route("/api/v1/flag", methods=["POST"])
+async def cq_flag(request: Request) -> JSONResponse:
+    account = _http_account(request)
+    if account is None:
+        return JSONResponse({"error": "X-API-Key required"}, status_code=401)
+    body = await request.json()
+    reason = body.get("reason", "incorrect")
+    conn = db.connect()
+    try:
+        row = db.get_entry_by_ku(conn, body.get("id", ""))
+        if row is None:
+            return JSONResponse({"error": "unknown KU id"}, status_code=404)
+        # 'incorrect' down-ranks via a fail vote; other reasons just acknowledge.
+        if reason == "incorrect":
+            weight = ranking.voter_weight(account["tier"])
+            db.record_confirmation(conn, row["id"], account["id"], False, weight)
+    finally:
+        conn.close()
+    return JSONResponse({"id": body.get("id"), "reason": reason, "flagged": True})
 
 
 def _admin_ok(request: Request) -> bool:
