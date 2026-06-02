@@ -41,3 +41,15 @@ def authenticate(conn, headers: dict) -> dict:
     if row["banned"]:
         raise AuthError("account suspended")
     return dict(row)
+
+
+def authenticate_optional(conn, headers: dict) -> dict | None:
+    """Like authenticate() but returns None when no key is present (anonymous).
+
+    A present-but-invalid or banned key still raises — only the *absence* of a
+    key yields None.
+    """
+    api_key = (headers or {}).get("x-api-key", "").strip()
+    if not api_key:
+        return None
+    return authenticate(conn, headers)

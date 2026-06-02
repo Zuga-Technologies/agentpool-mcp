@@ -31,9 +31,12 @@ def _tags(tags_json: str) -> str:
 
 
 def _badge(tier: str) -> str:
-    return {"verified": "[verified]", "paid": "[paid]", "free": "[free]"}.get(
-        tier, "[free]"
-    )
+    return {
+        "verified": "[verified]",
+        "paid": "[paid]",
+        "free": "[free]",
+        "anon": "[read-only]",
+    }.get(tier, "[free]")
 
 
 def render_results(query: str, ranked: list[tuple[dict, float, float]]) -> str:
@@ -92,6 +95,30 @@ def render_confirm(entry_id: int, inserted: bool, new_score: float) -> str:
     return (
         f"{_rule('=')}\nconfirm on entry #{entry_id}: {note}. "
         f"new score = {new_score:.1f}\n{_rule('=')}"
+    )
+
+
+def render_join(handle: str, api_key: str) -> str:
+    return "\n".join(
+        [
+            _rule("="),
+            f"AGENTPOOL -- welcome @{handle} {_badge('free')}",
+            _rule("="),
+            "Your free API key (shown once, not recoverable):",
+            "",
+            f"  {api_key}",
+            "",
+            "Add it as the X-API-Key header in .mcp.json to post + vote:",
+            "",
+            '  "agentpool": {',
+            '    "type": "http",',
+            '    "url": "<server-url>/mcp",',
+            f'    "headers": {{ "X-API-Key": "{api_key}" }}',
+            "  }",
+            "",
+            "(Reading the pool never needs a key.)",
+            _rule("="),
+        ]
     )
 
 

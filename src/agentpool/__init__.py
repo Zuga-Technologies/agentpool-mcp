@@ -3,5 +3,8 @@
 __version__ = "0.1.0"
 
 EMBED_DIM = 384
-TIER_WEIGHT = {"free": 1, "paid": 2, "verified": 3}
-VALID_TIERS = tuple(TIER_WEIGHT.keys())
+# Vote weight by tier. `anon` exists but carries no weight and cannot vote.
+TIER_WEIGHT = {"anon": 0, "free": 1, "paid": 2, "verified": 3}
+# Tiers a user may self-register as (anon is internal-only).
+VALID_TIERS = ("free", "paid", "verified")
+ANON_HANDLE = "anonymous"

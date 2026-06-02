@@ -85,6 +85,28 @@ def get_account_by_key_hash(conn, key_hash: str):
     ).fetchone()
 
 
+def get_account_by_handle(conn, handle: str):
+    return conn.execute(
+        "SELECT * FROM accounts WHERE handle = ?", (handle,)
+    ).fetchone()
+
+
+def ensure_anon_account(conn) -> dict:
+    """Singleton system account that owns anonymous posts (tier='anon')."""
+    from . import ANON_HANDLE
+
+    row = get_account_by_handle(conn, ANON_HANDLE)
+    if row is None:
+        # api_key_hash is unusable on purpose — no key maps to it.
+        conn.execute(
+            "INSERT INTO accounts (api_key_hash, handle, tier, created_at) VALUES (?,?,?,?)",
+            (f"__anon__{ANON_HANDLE}", ANON_HANDLE, "anon", _now()),
+        )
+        conn.commit()
+        row = get_account_by_handle(conn, ANON_HANDLE)
+    return dict(row)
+
+
 def account_counts(conn, account_id: int) -> tuple[int, int]:
     posts = conn.execute(
         "SELECT COUNT(*) FROM entries WHERE author_id = ?", (account_id,)

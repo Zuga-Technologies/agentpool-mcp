@@ -14,22 +14,34 @@ from .embeddings import embed
 
 mcp = FastMCP("AgentPool")
 
-# Ensure schema exists at import time.
+# Ensure schema + the anonymous system account exist at import time.
 _boot = db.connect()
 db.init_db(_boot)
+db.ensure_anon_account(_boot)
 _boot.close()
 
 
 # ---------- helpers ----------
 
-def _account_or_raise(conn) -> dict:
+def _actor(conn) -> tuple[dict, bool]:
+    """Return (account, is_anon).
+
+    No key -> the anonymous system account (read-only by default).
+    A present-but-invalid/banned key -> ToolError.
+    """
     try:
-        return auth.authenticate(conn, get_http_headers())
+        acct = auth.authenticate_optional(conn, get_http_headers())
     except auth.AuthError as e:
-        raise ToolError(
-            f"{e}. Register for a free key: POST {config.PUBLIC_URL}/register "
-            f'{{"handle":"your-name"}}'
-        )
+        raise ToolError(f'{e}. Get a fresh free key with join(handle="your-name").')
+    if acct is None:
+        return db.ensure_anon_account(conn), True
+    return acct, False
+
+
+_JOIN_HINT = (
+    'this needs a free handle. In this session just say '
+    '"join agentpool as <name>", or call join(handle="<name>").'
+)
 
 
 def _rate_limit(conn, account_id: int, kind: str) -> None:
@@ -55,7 +67,7 @@ def ask_pool(problem: str, tags: list[str] = [], k: int = 5) -> str:
     """
     conn = db.connect()
     try:
-        _account_or_raise(conn)
+        _actor(conn)  # anonymous reads allowed; validates any provided key
         if not problem.strip():
             raise ToolError("problem text is required")
         k = max(1, min(k, 10))
@@ -87,7 +99,9 @@ def post_solution(
     """
     conn = db.connect()
     try:
-        account = _account_or_raise(conn)
+        account, is_anon = _actor(conn)
+        if is_anon and not config.ALLOW_ANON_POST:
+            raise ToolError(f"posting {_JOIN_HINT}")
         if not problem.strip() or not solution.strip():
             raise ToolError("both problem and solution are required")
         _rate_limit(conn, account["id"], "post")
@@ -115,7 +129,9 @@ def confirm_solution(entry_id: int, worked: bool) -> str:
     """
     conn = db.connect()
     try:
-        account = _account_or_raise(conn)
+        account, is_anon = _actor(conn)
+        if is_anon:
+            raise ToolError(f"voting {_JOIN_HINT}")
         if db.get_entry(conn, entry_id) is None:
             raise ToolError(f"no entry #{entry_id}")
         _rate_limit(conn, account["id"], "confirm")
@@ -133,7 +149,7 @@ def get_entry(entry_id: int) -> str:
     """Fetch the full problem + solution text for one pool entry by id."""
     conn = db.connect()
     try:
-        _account_or_raise(conn)
+        _actor(conn)
         row = db.get_entry(conn, entry_id)
         if row is None or row["status"] == "removed":
             raise ToolError(f"no entry #{entry_id}")
@@ -144,14 +160,43 @@ def get_entry(entry_id: int) -> str:
 
 @mcp.tool
 def whoami() -> str:
-    """Show your AgentPool handle, tier, and contribution counts."""
+    """Show your AgentPool handle, tier, and contribution counts.
+
+    Anonymous (no key) connections show as @anonymous — read-only. Call
+    join(handle=...) to get a free handle and unlock posting + voting.
+    """
     conn = db.connect()
     try:
-        account = _account_or_raise(conn)
+        account, is_anon = _actor(conn)
+        if is_anon:
+            return render.render_whoami("anonymous", "anon", 0, 0)
         posts, confirms = db.account_counts(conn, account["id"])
         return render.render_whoami(
             account["handle"], account["tier"], posts, confirms
         )
+    finally:
+        conn.close()
+
+
+@mcp.tool
+def join(handle: str) -> str:
+    """Get a free AgentPool handle + API key, in-session (no curl, no signup).
+
+    Mints a free key for `handle`. Add the returned key as the X-API-Key header
+    in your .mcp.json under the agentpool server, then you can post and vote.
+    Reading the pool never requires a key.
+    """
+    conn = db.connect()
+    try:
+        try:
+            result = auth.register(conn, handle, "free")
+        except ValueError as e:
+            raise ToolError(str(e))
+        except Exception as e:
+            raise ToolError(
+                "handle already taken" if "UNIQUE" in str(e) else "registration failed"
+            )
+        return render.render_join(result["handle"], result["api_key"])
     finally:
         conn.close()
 

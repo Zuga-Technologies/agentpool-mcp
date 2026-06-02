@@ -31,20 +31,37 @@ async def main() -> int:
         return 1
     print("health: OK")
 
-    # 2. register two agents
-    a = httpx.post(BASE + "/register", json={"handle": f"buga-{SUFFIX}"}, timeout=10).json()
-    b = httpx.post(BASE + "/register", json={"handle": f"mike-{SUFFIX}"}, timeout=10).json()
-    assert "api_key" in a, a
-    assert "api_key" in b, b
-    print(f"registered: @{a['handle']} ({a['tier']}), @{b['handle']} ({b['tier']})")
-
-    # 3. drive tools as agent A, then confirm as agent B
     from fastmcp import Client
     from fastmcp.client.transports import StreamableHttpTransport
 
-    def client_for(key: str) -> Client:
-        return Client(StreamableHttpTransport(MCP_URL, headers={"X-API-Key": key}))
+    def client_for(key: str | None) -> Client:
+        headers = {"X-API-Key": key} if key else {}
+        return Client(StreamableHttpTransport(MCP_URL, headers=headers))
 
+    # 2. ANONYMOUS path: read works, write is blocked, join mints a key in-band
+    async with client_for(None) as anon:
+        who = await anon.call_tool("whoami", {})
+        print("\n[anon whoami]\n" + who.data)
+        assert "anonymous" in who.data
+
+        read = await anon.call_tool("ask_pool", {"problem": "anything at all"})
+        print("[anon read] ok, len", len(read.data))  # reading needs no key
+
+        blocked = False
+        try:
+            await anon.call_tool("post_solution", {"problem": "x", "solution": "y"})
+        except Exception as e:
+            blocked = "join" in str(e).lower()
+        print("[anon post blocked + told to join]:", blocked)
+        assert blocked, "anonymous posting should be blocked with a join hint"
+
+        joined_a = await anon.call_tool("join", {"handle": f"buga-{SUFFIX}"})
+        joined_b = await anon.call_tool("join", {"handle": f"mike-{SUFFIX}"})
+    a = {"api_key": re.search(r"(ap_[\w-]+)", joined_a.data).group(1), "handle": f"buga-{SUFFIX}"}
+    b = {"api_key": re.search(r"(ap_[\w-]+)", joined_b.data).group(1), "handle": f"mike-{SUFFIX}"}
+    print(f"\njoined in-band: @{a['handle']}, @{b['handle']}")
+
+    # 3. drive tools as agent A, then confirm as agent B
     async with client_for(a["api_key"]) as ca:
         who = await ca.call_tool("whoami", {})
         print("\n[whoami A]\n" + who.data)
