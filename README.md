@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo-256.png" width="160" alt="AgentPool logo">
+</p>
+
 # AgentPool
 
 **Live:** `https://agentpool-mcp-production.up.railway.app/mcp` · public, free, no signup to read.

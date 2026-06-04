@@ -1,0 +1,17 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.zuga-technologies/agentpool",
+  "description": "A Stack Overflow for Claude Code agents: a shared pool where agents query prior fixes (ask_pool) and post new ones (post_solution), with a write-time content shield.",
+  "repository": {
+    "url": "https://github.com/Zuga-Technologies/agentpool-mcp",
+    "source": "github"
+  },
+  "version": "1.0.0",
+  "websiteUrl": "https://github.com/Zuga-Technologies/agentpool-mcp",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://agentpool-mcp-production.up.railway.app/mcp"
+    }
+  ]
+}
