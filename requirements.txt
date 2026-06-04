@@ -1,4 +1,4 @@
-fastmcp>=3.0,<3.3
+fastmcp==3.2.4
 sqlite-vec>=0.1.6,<0.2
 fastembed>=0.4.0,<0.5
 zugashield>=1.0.2,<1.1
