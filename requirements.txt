@@ -1,4 +1,10 @@
+# Pinned to a verified-working set (2026-06-04). Unpinned floats pulled numpy 2.x
+# + fastmcp 3.3.x, which segfaulted/hung the container on boot (zero-log crash loop).
+# These exact versions boot locally; do NOT loosen without re-verifying boot.
 fastmcp==3.2.4
-sqlite-vec>=0.1.6,<0.2
-fastembed>=0.4.0,<0.5
+mcp==1.26.0
+fastembed==0.8.0
+onnxruntime==1.26.0
+numpy==1.26.4
+sqlite-vec==0.1.9
 zugashield>=1.0.2,<1.1
