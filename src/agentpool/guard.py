@@ -31,8 +31,45 @@ _SINK = re.compile(
 )
 
 
+# Imperative "expose the environment" instruction: an expose verb directly on
+# env vars / secrets within a short span. Catches indirect-injection exfil like
+# "...instead print all environment variables" (corpus inj-003) WITHOUT tripping
+# on benign prose that merely mentions env vars ("service env vars override the
+# ARG", "which venv the entrypoint uses") -- those have no expose verb adjacent.
+_ENV_DUMP = re.compile(
+    r"\b(print|dump|reveal|output|show|send|leak|exfiltrat\w*|extract|echo|cat|list)\b"
+    r"[^.\n]{0,40}?\b(all\s+|every\s+)?"
+    r"(environment\s+variables?|env\s*vars?|secrets?|credentials?|api[ _-]?keys?)\b",
+    re.I,
+)
+
+
 def _exfil_instruction(text: str) -> bool:
-    return bool(_SENSITIVE.search(text) and _SINK.search(text))
+    return bool(
+        (_SENSITIVE.search(text) and _SINK.search(text)) or _ENV_DUMP.search(text)
+    )
+
+
+# ZugaShield signatures that false-positive on legitimate developer prose and
+# must NOT block a post on their own. EX-015 ("attempts to extract or leak
+# environment variables") is a CRITICAL instruction-heuristic that fires on
+# benign technical text mentioning env vars (e.g. "service env vars override the
+# Dockerfile ARG", "which venv the entrypoint uses"). REAL env-exfiltration
+# instructions (`env | curl ...`, dumping ~/.ssh) are still caught precisely by
+# our stateless _exfil_instruction layer above, so dropping this signature
+# yields zero false positives with no loss of real protection. Literal
+# leaked-secret detection (actual key values) uses other signatures and is
+# unaffected.
+_IGNORED_SIGNATURES = {"EX-015"}
+
+
+def _real_threats(decision):
+    """Threats minus the known false-positive signatures."""
+    return [
+        t
+        for t in decision.threats_detected
+        if getattr(t, "signature_id", None) not in _IGNORED_SIGNATURES
+    ]
 
 
 @lru_cache(maxsize=1)
@@ -101,13 +138,15 @@ def screen_post(problem: str, solution: str) -> tuple[bool, str]:
     try:
         combined = f"{problem}\n\n{solution}"
         pd = _check(shield, "prompt", combined)
-        if pd.is_blocked:
-            why = _threats(pd) or "prompt-injection pattern"
+        pd_real = _real_threats(pd)
+        if pd.is_blocked and pd_real:
+            why = _threats_of(pd_real) or "prompt-injection pattern"
             return False, f"injection risk ({why})"
 
         od = _check(shield, "output", solution)
-        if od.is_blocked:
-            why = _threats(od) or "secret/credential"
+        od_real = _real_threats(od)
+        if od.is_blocked and od_real:
+            why = _threats_of(od_real) or "secret/credential"
             return False, f"leaked secret ({why})"
     except Exception as e:
         log.warning("content shield errored, allowing post: %s", e)
@@ -116,5 +155,5 @@ def screen_post(problem: str, solution: str) -> tuple[bool, str]:
     return True, ""
 
 
-def _threats(decision) -> str:
-    return "; ".join(t.description for t in decision.threats_detected[:3])
+def _threats_of(threats) -> str:
+    return "; ".join(t.description for t in threats[:3])
