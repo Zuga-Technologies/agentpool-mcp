@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="42%" r="62%">
+      <stop offset="0%" stop-color="#2a0a0e"/>
+      <stop offset="100%" stop-color="#0a0506"/>
+    </radialGradient>
+    <linearGradient id="head" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e23b46"/>
+      <stop offset="55%" stop-color="#b91c2b"/>
+      <stop offset="100%" stop-color="#7f1018"/>
+    </linearGradient>
+    <linearGradient id="headHi" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.28"/>
+      <stop offset="40%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff5a5a"/>
+      <stop offset="100%" stop-color="#c81d25"/>
+    </linearGradient>
+    <radialGradient id="pool" cx="50%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#ff5a5a" stop-opacity="0.28"/>
+      <stop offset="100%" stop-color="#0a0506" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="glow" x="-70%" y="-70%" width="240%" height="240%">
+      <feGaussianBlur stdDeviation="6" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="softShadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="5" stdDeviation="10" flood-color="#000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <circle cx="256" cy="256" r="250" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="250" fill="none" stroke="#e23b46" stroke-width="4" opacity="0.55"/>
+  <circle cx="256" cy="256" r="236" fill="none" stroke="url(#accent)" stroke-width="1.5" opacity="0.22"/>
+
+  <!-- pool -->
+  <ellipse cx="256" cy="378" rx="176" ry="50" fill="url(#pool)"/>
+  <g stroke="url(#accent)" stroke-width="2.6" opacity="0.6" stroke-linecap="round" fill="none">
+    <line x1="256" y1="320" x2="116" y2="362"/><line x1="256" y1="320" x2="188" y2="398"/>
+    <line x1="256" y1="320" x2="256" y2="412"/><line x1="256" y1="320" x2="324" y2="398"/>
+    <line x1="256" y1="320" x2="396" y2="362"/>
+  </g>
+  <g stroke="url(#accent)" stroke-width="1.5" opacity="0.3" stroke-linecap="round" fill="none">
+    <line x1="116" y1="362" x2="188" y2="398"/><line x1="188" y1="398" x2="256" y2="412"/>
+    <line x1="256" y1="412" x2="324" y2="398"/><line x1="324" y1="398" x2="396" y2="362"/>
+  </g>
+  <g>
+    <circle cx="116" cy="362" r="12" fill="url(#accent)" filter="url(#glow)"/>
+    <circle cx="188" cy="398" r="12" fill="url(#accent)" filter="url(#glow)"/>
+    <circle cx="256" cy="414" r="15" fill="#fff" filter="url(#glow)"/>
+    <circle cx="324" cy="398" r="12" fill="url(#accent)" filter="url(#glow)"/>
+    <circle cx="396" cy="362" r="12" fill="url(#accent)" filter="url(#glow)"/>
+  </g>
+
+  <!-- antenna -->
+  <line x1="256" y1="116" x2="256" y2="68" stroke="#b91c2b" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="256" cy="56" r="14" fill="#fff" filter="url(#glow)"/>
+  <path d="M 231 48 Q 222 36 231 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity="0.5"/>
+  <path d="M 281 48 Q 290 36 281 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- side ports -->
+  <rect x="118" y="182" width="34" height="64" rx="13" fill="#7f1018"/>
+  <circle cx="135" cy="214" r="7" fill="url(#accent)" filter="url(#glow)" opacity="0.85"/>
+  <rect x="360" y="182" width="34" height="64" rx="13" fill="#7f1018"/>
+  <circle cx="377" cy="214" r="7" fill="url(#accent)" filter="url(#glow)" opacity="0.85"/>
+
+  <!-- head -->
+  <rect x="150" y="118" width="212" height="188" rx="48" ry="48" fill="url(#head)" filter="url(#softShadow)"/>
+  <rect x="150" y="118" width="212" height="188" rx="48" ry="48" fill="url(#headHi)"/>
+  <rect x="150" y="118" width="212" height="188" rx="48" ry="48" fill="none" stroke="#000" stroke-width="3" opacity="0.35"/>
+
+  <!-- Deadpool-style white mask eyes: angled teardrop ovals, black outline -->
+  <g>
+    <path d="M 196 168 Q 244 176 240 214 Q 236 246 200 244 Q 178 242 178 206 Q 178 176 196 168 Z"
+          fill="#f5f5f0" stroke="#0a0506" stroke-width="7"/>
+    <path d="M 316 168 Q 268 176 272 214 Q 276 246 312 244 Q 334 242 334 206 Q 334 176 316 168 Z"
+          fill="#f5f5f0" stroke="#0a0506" stroke-width="7"/>
+  </g>
+
+  <!-- mouth: pool/knowledge bar -->
+  <rect x="198" y="266" width="116" height="26" rx="11" fill="#0a0506" opacity="0.85"/>
+  <circle cx="226" cy="279" r="5" fill="url(#accent)"/>
+  <circle cx="256" cy="279" r="5" fill="#fff"/>
+  <circle cx="286" cy="279" r="5" fill="url(#accent)"/>
+</svg>
