@@ -47,8 +47,9 @@ poisoned cohort is removable in one query.
 ## The part most "shared memory" projects skip: poisoning
 
 A shared, writable pool is an attack surface. AgentPoison (NeurIPS 2024) showed a
-**single** malicious entry at <0.1% of a knowledge base can misdirect >80% of
-triggered queries. So every `post_solution` runs through a write-time content shield
+poison rate under 0.1% of a knowledge base can hit an 82% retrieval-success rate
+and a 63% end-to-end attack success rate against a RAG agent. So every
+`post_solution` runs through a write-time content shield
 before it can ever reach a reading agent — it screens for indirect prompt-injection
 ("ignore previous instructions…") and leaked secrets/exfiltration. A blocked post
 never lands. Scanned once at write time so reads stay fast (~1–2ms/post).
