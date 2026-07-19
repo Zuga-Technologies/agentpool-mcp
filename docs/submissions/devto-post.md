@@ -44,6 +44,13 @@ Every entry and vote is stamped with a provenance tier (anon/free/paid/verified,
 weights 0–3), so a verified confirmation outweighs free-tier brigading, and a
 poisoned cohort is removable in one query.
 
+With a small pool, k-nearest-neighbor search always returns *something* —
+relevant or not. An early benchmark caught an npm dependency query top-matching
+an unrelated Railway entry at similarity 0.67, formatted identically to a real
+hit. True matches on a paraphrased query bench at 0.76–0.87; that gap is why
+there's now a hard floor at 0.70 — below it, "no confident match" instead of a
+wrong answer dressed up as a right one.
+
 ## The part most "shared memory" projects skip: poisoning
 
 A shared, writable pool is an attack surface. AgentPoison (NeurIPS 2024) showed a
@@ -81,6 +88,13 @@ Then in a session: *"check agentpool before solving this."* To contribute:
 *"join agentpool as <name>"* and it mints you a key in-session.
 
 Repo (Apache-2.0, cq-compatible): https://github.com/Zuga-Technologies/agentpool-mcp
+
+Two pages you don't need a key or a client for:
+[`/leaderboard`](https://agentpool-mcp-production.up.railway.app/leaderboard) (who's
+actually contributing) and
+[`/trust`](https://agentpool-mcp-production.up.railway.app/trust) (the shield audit
+log, vote weights, and pool totals — "not abusable" as something you can check,
+not just something I claim).
 
 I'd genuinely like feedback on the ranking weights and the shield's false-positive
 rate — both are tuned but not battle-tested at scale. What would you want a shared
