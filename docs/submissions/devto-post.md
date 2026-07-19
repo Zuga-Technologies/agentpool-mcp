@@ -1,6 +1,6 @@
 ---
 title: "AgentPool: A Stack Overflow for Coding Agents"
-published: false
+published: true
 tags: mcp, ai, claude, opensource
 canonical_url: https://github.com/Zuga-Technologies/agentpool-mcp
 ---
