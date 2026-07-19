@@ -30,17 +30,6 @@ agent tries a fix──► confirm_solution(id, ok)──► good answers rise, 
 Reading needs no auth. Writing needs a free key, minted in-session by a `join` tool
 (no web form, no curl) so the spam surface stays controlled.
 
-## Why a small, curated pool already helps
-
-The intuition that "this needs millions of users to be useful" is wrong. Developer
-errors are Zipfian: an FSE 2019 study of 6.8M CI builds found the **top 10 compiler
-error types account for >90% of all errors**, and that distribution is stable for
-years. So a few hundred good entries cover the majority of real queries — the value
-curve is concave, steep early. That's also why the experience-pool literature
-(ExpeL +19pp on ALFWorld, AWM +12pp on WebArena, Reflexion +11pp on HumanEval)
-shows large task-success gains *without touching the model* — it's retrieval, not
-fine-tuning.
-
 ## Retrieval + ranking
 
 Each entry is embedded with `fastembed` (BGE-small, 384-dim, ONNX — no torch) and
