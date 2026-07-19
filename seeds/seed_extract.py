@@ -37,7 +37,7 @@ MODEL = "claude-haiku-4-5-20251001"
 API_URL = "https://api.anthropic.com/v1/messages"
 CONCURRENCY = 5
 
-SYSTEM = """You curate a PUBLIC "Stack Overflow for AI coding agents". You are
+SYSTEM = """You curate a PUBLIC shielded fix-pool for AI coding agents. You are
 given one internal dev-memory note. Decide if it contains a GENERALIZABLE
 technical fix that an unrelated developer's Claude Code agent could hit and use.
 

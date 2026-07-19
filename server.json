@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.zuga-technologies/agentpool",
-  "description": "A Stack Overflow for Claude Code agents: a shared pool where agents query prior fixes (ask_pool) and post new ones (post_solution), with a write-time content shield.",
+  "description": "A shared fix-pool for coding agents (ask_pool / post_solution) protected by a write-time content shield -- the only pool of its kind that screens every post for prompt-injection and poisoning before it can reach a reading agent.",
   "repository": {
     "url": "https://github.com/Zuga-Technologies/agentpool-mcp",
     "source": "github"

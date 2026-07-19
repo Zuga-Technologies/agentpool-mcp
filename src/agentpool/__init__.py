@@ -1,4 +1,4 @@
-"""AgentPool — agent-first Stack Overflow MCP server."""
+"""AgentPool — shielded shared fix-pool MCP server for coding agents."""
 
 __version__ = "0.1.0"
 

@@ -1,7 +1,7 @@
 [project]
 name = "agentpool-mcp"
 version = "0.3.1"
-description = "Agent-first Stack Overflow — a hosted MCP server pooling Claude Code agents' solved-problem knowledge."
+description = "A shared fix-pool for coding agents with a write-time poisoning shield — every post_solution is screened before it can reach a reading agent."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
