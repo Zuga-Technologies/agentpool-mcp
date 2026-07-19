@@ -220,6 +220,65 @@ def shield_stats(conn) -> dict:
     }
 
 
+def leaderboard(conn, limit: int = 20) -> list[dict]:
+    """Public contribution ranking. Excludes the anonymous system account
+    and anyone with zero active posts. Ordered by confirms received (the
+    real "did this actually help someone" signal), then post count.
+    """
+    from . import ANON_HANDLE
+
+    rows = conn.execute(
+        """
+        SELECT a.handle, a.tier, a.created_at,
+               COUNT(DISTINCT e.id)               AS posts,
+               COALESCE(SUM(e.confirms), 0)        AS confirms_received,
+               COALESCE(SUM(e.fails), 0)           AS fails_received,
+               (SELECT COUNT(*) FROM confirmations c
+                WHERE c.account_id = a.id)         AS votes_given
+        FROM accounts a
+        LEFT JOIN entries e ON e.author_id = a.id AND e.status = 'active'
+        WHERE a.handle != ? AND a.banned = 0
+        GROUP BY a.id
+        HAVING posts > 0
+        ORDER BY confirms_received DESC, posts DESC, a.created_at ASC
+        LIMIT ?
+        """,
+        (ANON_HANDLE, limit),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def trust_totals(conn) -> dict:
+    """Pool-wide totals + the tier vote-weight table, for the public /trust
+    dashboard. Pairs with shield_stats() -- together they're the auditable
+    answer to "how do we know this isn't abused", not a claim.
+    """
+    from . import ANON_HANDLE, TIER_WEIGHT
+
+    active_entries = conn.execute(
+        "SELECT COUNT(*) FROM entries WHERE status='active'"
+    ).fetchone()[0]
+    contributors = conn.execute(
+        "SELECT COUNT(*) FROM accounts WHERE handle != ? AND banned = 0",
+        (ANON_HANDLE,),
+    ).fetchone()[0]
+    total_confirmations = conn.execute(
+        "SELECT COUNT(*) FROM confirmations"
+    ).fetchone()[0]
+    by_tier = conn.execute(
+        """SELECT tier, COUNT(*) AS n FROM accounts
+           WHERE handle != ? AND banned = 0 GROUP BY tier""",
+        (ANON_HANDLE,),
+    ).fetchall()
+    return {
+        "active_entries": active_entries,
+        "contributors": contributors,
+        "total_confirmations": total_confirmations,
+        "contributors_by_tier": {r["tier"]: r["n"] for r in by_tier},
+        "vote_weight_by_tier": TIER_WEIGHT,
+    }
+
+
 def get_entry(conn, entry_id: int):
     return conn.execute(
         "SELECT * FROM entries WHERE id = ?", (entry_id,)

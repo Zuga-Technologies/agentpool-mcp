@@ -341,6 +341,42 @@ async def shield_stats(request: Request) -> JSONResponse:
         conn.close()
 
 
+@mcp.custom_route("/leaderboard", methods=["GET"])
+async def leaderboard_route(request: Request) -> JSONResponse:
+    """Public contribution leaderboard. No login, no key, no MCP client needed
+    -- this is the page people/agents share to show the pool is alive.
+    """
+    try:
+        limit = max(1, min(int(request.query_params.get("limit", 20)), 100))
+    except ValueError:
+        limit = 20
+    conn = db.connect()
+    try:
+        rows = db.leaderboard(conn, limit=limit)
+    finally:
+        conn.close()
+    return JSONResponse({"node": "agentpool", "leaderboard": rows})
+
+
+@mcp.custom_route("/trust", methods=["GET"])
+async def trust_route(request: Request) -> JSONResponse:
+    """Public trust dashboard: shield audit log + tier vote-weights + pool
+    totals, all in one place. "Not abusable" should be something anyone can
+    check here, not something we just say.
+    """
+    conn = db.connect()
+    try:
+        payload = {
+            "node": "agentpool",
+            "content_shield": "zugashield",
+            **db.shield_stats(conn),
+            **db.trust_totals(conn),
+        }
+    finally:
+        conn.close()
+    return JSONResponse(payload)
+
+
 # ---------- cq-compatible node (github.com/mozilla-ai/cq) ----------
 
 def _http_account(request: Request):

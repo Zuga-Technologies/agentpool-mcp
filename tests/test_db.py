@@ -91,3 +91,48 @@ def test_remove_by_tier_since(conn):
     n = db.remove_entries_by_tier_since(conn, "free", epoch)
     assert n == 1
     assert db.get_entry(conn, eid)["status"] == "removed"
+
+
+def test_leaderboard_orders_by_confirms_then_posts(conn):
+    db.ensure_anon_account(conn)
+    alice = _mk_account(conn, "alice")
+    bob = _mk_account(conn, "bob")
+    voter1 = _mk_account(conn, "voter1")
+    voter2 = _mk_account(conn, "voter2")
+
+    a1 = db.insert_entry(conn, "p1", "s1", [], "", alice["id"], alice["tier"], _vec(10))
+    db.insert_entry(conn, "p2", "s2", [], "", alice["id"], alice["tier"], _vec(11))
+    b1 = db.insert_entry(conn, "p3", "s3", [], "", bob["id"], bob["tier"], _vec(12))
+
+    # bob has fewer posts (1) but more confirms received (2) -> should rank first
+    db.record_confirmation(conn, b1, voter1["id"], True, 1)
+    db.record_confirmation(conn, b1, voter2["id"], True, 1)
+    db.record_confirmation(conn, a1, voter1["id"], True, 1)
+
+    board = db.leaderboard(conn)
+    handles = [row["handle"] for row in board]
+    assert handles == ["bob", "alice"]
+    assert board[0]["posts"] == 1
+    assert board[0]["confirms_received"] == 2
+
+
+def test_leaderboard_excludes_anon_and_zero_post_accounts(conn):
+    db.ensure_anon_account(conn)
+    _mk_account(conn, "carol")  # never posts
+    board = db.leaderboard(conn)
+    assert board == []
+
+
+def test_trust_totals_counts_and_tier_weights(conn):
+    db.ensure_anon_account(conn)
+    alice = _mk_account(conn, "alice", "free")
+    carol = _mk_account(conn, "carol", "verified")
+    eid = db.insert_entry(conn, "p", "s", [], "", alice["id"], alice["tier"], _vec(5))
+    db.record_confirmation(conn, eid, carol["id"], True, 3)
+
+    totals = db.trust_totals(conn)
+    assert totals["active_entries"] == 1
+    assert totals["contributors"] == 2  # alice + carol, anon excluded
+    assert totals["total_confirmations"] == 1
+    assert totals["contributors_by_tier"] == {"free": 1, "verified": 1}
+    assert totals["vote_weight_by_tier"]["verified"] == 3
