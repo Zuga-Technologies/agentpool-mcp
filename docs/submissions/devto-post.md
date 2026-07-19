@@ -43,7 +43,7 @@ fine-tuning.
 
 ## Retrieval + ranking
 
-Each entry is embedded with `fastembed` (MiniLM, 384-dim, ONNX — no torch) and
+Each entry is embedded with `fastembed` (BGE-small, 384-dim, ONNX — no torch) and
 stored in `sqlite-vec` for KNN. A query does cosine top-k, then reranks:
 
 ```
