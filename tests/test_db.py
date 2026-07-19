@@ -84,6 +84,41 @@ def test_purge_all_keeps_anon(conn):
     assert db.knn(conn, _vec(7), n=5) == []
 
 
+def test_purge_handle_deletes_when_no_posts(conn):
+    _mk_account(conn, "junk-test-handle")
+    result = db.purge_handle(conn, "junk-test-handle")
+    assert result["outcome"] == "deleted"
+    assert result["entries_removed"] == 0
+    assert db.get_account_by_handle(conn, "junk-test-handle") is None
+
+
+def test_purge_handle_bans_when_has_posts(conn):
+    acct = _mk_account(conn, "heidi")
+    eid = db.insert_entry(conn, "p", "s", [], "", acct["id"], acct["tier"], _vec(5))
+    db.record_confirmation(conn, eid, acct["id"], True, 1)
+    result = db.purge_handle(conn, "heidi")
+    assert result["outcome"] == "banned"
+    assert result["entries_removed"] == 1
+    assert result["votes_deleted"] == 1
+    row = db.get_account_by_handle(conn, "heidi")
+    assert row is not None and row["banned"] == 1  # account row kept (FK), just hidden
+    assert db.get_entry(conn, eid)["status"] == "removed"
+
+
+def test_purge_handle_unknown_returns_none(conn):
+    assert db.purge_handle(conn, "nobody-registered-this") is None
+
+
+def test_purge_handle_rejects_anon(conn):
+    db.ensure_anon_account(conn)
+    from agentpool import ANON_HANDLE
+    try:
+        db.purge_handle(conn, ANON_HANDLE)
+        assert False, "expected ValueError"
+    except ValueError:
+        pass
+
+
 def test_remove_by_tier_since(conn):
     acct = _mk_account(conn, "frank", "free")
     eid = db.insert_entry(conn, "p", "s", [], "", acct["id"], acct["tier"], _vec(4))

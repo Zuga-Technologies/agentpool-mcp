@@ -361,6 +361,48 @@ def remove_entries_by_tier_since(conn, tier: str, since_iso: str) -> int:
     return cur.rowcount
 
 
+def purge_handle(conn, handle: str) -> dict | None:
+    """Remove one handle's presence from the pool. Their entries are
+    soft-removed (status='removed', same as remove_entries_by_tier_since)
+    and their votes hard-deleted. The account row itself is only hard-
+    deleted if they never posted -- entries.author_id has no ON DELETE
+    CASCADE, so a live FK would block deleting an account any soft-removed
+    entry still points to. An account with real history is banned instead
+    (matches leaderboard/trust_totals, which already exclude banned=1) so
+    that history keeps a valid author_id rather than being destroyed.
+    Returns None if the handle doesn't exist.
+    """
+    from . import ANON_HANDLE
+
+    if handle == ANON_HANDLE:
+        raise ValueError("cannot purge the anon system account")
+    row = get_account_by_handle(conn, handle)
+    if row is None:
+        return None
+    account_id = row["id"]
+    total_posts, _ = account_counts(conn, account_id)
+    entries_removed = conn.execute(
+        "UPDATE entries SET status='removed' WHERE author_id = ? AND status != 'removed'",
+        (account_id,),
+    ).rowcount
+    votes_deleted = conn.execute(
+        "DELETE FROM confirmations WHERE account_id = ?", (account_id,)
+    ).rowcount
+    if total_posts == 0:
+        conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+        outcome = "deleted"
+    else:
+        conn.execute("UPDATE accounts SET banned = 1 WHERE id = ?", (account_id,))
+        outcome = "banned"
+    conn.commit()
+    return {
+        "handle": handle,
+        "outcome": outcome,
+        "entries_removed": entries_removed,
+        "votes_deleted": votes_deleted,
+    }
+
+
 def purge_all(conn) -> dict:
     """Wipe all pool content + non-anon accounts. Pre-launch / hard-reset only."""
     from . import ANON_HANDLE

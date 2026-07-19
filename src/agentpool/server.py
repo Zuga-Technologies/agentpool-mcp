@@ -592,6 +592,28 @@ async def admin_purge_tier(request: Request) -> JSONResponse:
     return JSONResponse({"removed": n, "tier": tier, "since": since})
 
 
+@mcp.custom_route("/admin/purge_handle", methods=["POST"])
+async def admin_purge_handle(request: Request) -> JSONResponse:
+    """Remove one handle -- hard-deleted if they never posted (the junk/
+    test-registration case), otherwise banned + their entries soft-removed."""
+    if not _admin_ok(request):
+        return JSONResponse({"error": "forbidden"}, status_code=403)
+    body = await request.json()
+    handle = (body or {}).get("handle", "")
+    if not handle:
+        return JSONResponse({"error": "handle required"}, status_code=400)
+    conn = db.connect()
+    try:
+        result = db.purge_handle(conn, handle)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    finally:
+        conn.close()
+    if result is None:
+        return JSONResponse({"error": f"no account with handle {handle!r}"}, status_code=404)
+    return JSONResponse(result)
+
+
 def main() -> None:
     mcp.run(transport="http", host=config.HOST, port=config.PORT, path="/mcp")
 
