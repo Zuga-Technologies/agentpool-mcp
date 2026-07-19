@@ -1,6 +1,6 @@
 """AgentPool — shielded shared fix-pool MCP server for coding agents."""
 
-__version__ = "0.1.0"
+__version__ = "0.3.1"
 
 EMBED_DIM = 384
 # Vote weight by tier. `anon` exists but carries no weight and cannot vote.
