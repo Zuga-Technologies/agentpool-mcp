@@ -13,6 +13,8 @@ import re
 import uuid
 from functools import lru_cache
 
+from . import config
+
 log = logging.getLogger("agentpool.guard")
 
 # Exfiltration-instruction layer (AgentPool, on top of ZugaShield).
@@ -49,6 +51,86 @@ def _exfil_instruction(text: str) -> bool:
     return bool(
         (_SENSITIVE.search(text) and _SINK.search(text)) or _ENV_DUMP.search(text)
     )
+
+
+# ---------------------------------------------------------------------------
+# Trust & safety: this is a separate concern from the security layers above.
+# The security layers (exfil, ZugaShield's prompt-armor/DLP) protect a READING
+# AGENT from a malicious post. This layer protects HUMANS from harmful content
+# a writable, publicly-readable pool could otherwise carry. Deliberately kept
+# in AgentPool's own guard.py, not pushed into ZugaShield -- ZugaShield's 7
+# layers are all agent-security (injection/exfil/tool-abuse), not content
+# moderation, and that scope split should stay clean.
+#
+# CSAM: deterministic, always on, no API key needed. Text-only proximity
+# heuristic (age/minor indicator + sexual-content indicator co-occurring, or
+# an unambiguous named phrase on its own) -- AgentPool has no image upload
+# path, so this is about solicitation/description in text, not image-hash
+# matching (PhotoDNA/NCMEC territory, a different infrastructure problem that
+# doesn't apply to a text-only API). Kept clinical/non-graphic on purpose --
+# this is public source in an Apache-2.0 repo.
+_MINOR_INDICATOR = re.compile(
+    r"\b(child|children|kid|kids|minor|minors|underage|preteen|pre-teen|toddler"
+    r"|middle[- ]school(er)?|elementary[- ]school(er)?"
+    r"|\b(?:[6-9]|1[0-7])[\s-]?(?:years?|yrs?|y\.?o\.?)\b)",
+    re.I,
+)
+_SEXUAL_CONTENT = re.compile(
+    r"\b(sexual(ly)?|explicit|nude|naked|porn(ographic|ography)?|erotic|molest\w*)\b",
+    re.I,
+)
+_CSAM_NAMED = re.compile(r"\b(csam|child\s+sexual\s+abuse|child\s+porn\w*)\b", re.I)
+
+
+def _csam_solicitation(text: str) -> bool:
+    return bool(
+        _CSAM_NAMED.search(text)
+        or (_MINOR_INDICATOR.search(text) and _SEXUAL_CONTENT.search(text))
+    )
+
+
+# Hate speech / harassment (racism, homophobia, targeted slurs, etc.): NOT a
+# hardcoded term list -- a slur/keyword dictionary shipped in a public repo is
+# both brittle (trivially evaded) and itself a bad thing to publish. This
+# needs contextual judgment a regex can't give, so it's an opt-in LLM judge
+# (same pattern as ZugaShield's own llm_judge.py: cheap Haiku call, fails
+# open). OFF by default -- requires ANTHROPIC_API_KEY + AGENTPOOL_CONTENT_
+# JUDGE_ENABLED=true. Until that's provisioned, hate/harassment content is
+# NOT screened by this layer (the CSAM check above still runs regardless).
+_HATE_JUDGE_PROMPT = """You are a trust & safety classifier for a public, \
+written-by-anyone technical knowledge pool (developers post programming \
+problems and fixes). Classify ONLY for hate speech, harassment, or targeted \
+slurs (racism, homophobia, and similar) -- NOT for anything else (do not \
+flag profanity, criticism of code/tools, or ordinary technical disagreement).
+
+Respond with EXACTLY one word:
+- BLOCK if the text contains hate speech, harassment, or a targeted slur
+- ALLOW otherwise
+
+Be conservative: if uncertain, respond ALLOW."""
+
+
+def _hate_harassment_judge(text: str) -> tuple[bool, str]:
+    """Return (blocked, reason). Fail-open on any error or when disabled."""
+    if not config.CONTENT_JUDGE_ENABLED:
+        return False, ""
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic()
+        msg = client.messages.create(
+            model=config.CONTENT_JUDGE_MODEL,
+            max_tokens=10,
+            system=_HATE_JUDGE_PROMPT,
+            messages=[{"role": "user", "content": text[:2000]}],
+        )
+        verdict = msg.content[0].text.strip().upper()
+        if verdict == "BLOCK":
+            return True, "hate speech / harassment (content judge)"
+        return False, ""
+    except Exception as e:  # missing package, missing key, API error -- fail open
+        log.warning("content judge unavailable, allowing post: %s", e)
+        return False, ""
 
 
 # ZugaShield signatures that false-positive on legitimate developer prose and
@@ -129,9 +211,19 @@ def screen_post(problem: str, solution: str) -> tuple[bool, str]:
     Rejects on prompt-injection in the combined text (check_prompt) or on a
     leaked secret/credential in the solution (check_output / DLP).
     """
-    # Stateless AgentPool layer first (no external dep, can't fail open).
-    if _exfil_instruction(f"{problem}\n{solution}"):
+    combined_text = f"{problem}\n{solution}"
+
+    # Stateless AgentPool layers first (no external dep, can't fail open).
+    if _exfil_instruction(combined_text):
         return False, "exfiltration instruction (sensitive target + network sink)"
+    if _csam_solicitation(combined_text):
+        return False, "content policy violation"
+
+    # Opt-in content judge (hate speech / harassment) -- no-op unless
+    # AGENTPOOL_CONTENT_JUDGE_ENABLED=true and an API key is provisioned.
+    blocked, reason = _hate_harassment_judge(combined_text)
+    if blocked:
+        return False, reason
 
     try:
         shield = _shield()

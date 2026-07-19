@@ -1,4 +1,4 @@
-from agentpool import guard
+from agentpool import config, guard
 
 
 def test_benign_post_allowed():
@@ -32,3 +32,46 @@ def test_leaked_secret_rejected():
     )
     assert ok is False
     assert any(w in reason.lower() for w in ("secret", "injection", "credential"))
+
+
+def test_csam_named_phrase_rejected():
+    ok, reason = guard.screen_post("x", "this contains child sexual abuse content")
+    assert ok is False
+    assert "policy" in reason.lower()
+
+
+def test_csam_proximity_rejected():
+    ok, reason = guard.screen_post(
+        "looking for content", "explicit nude images of a 12 years old"
+    )
+    assert ok is False
+    assert "policy" in reason.lower()
+
+
+def test_minor_mention_alone_allowed():
+    # A minor/age indicator with no sexual-content term must NOT trip the gate
+    # -- e.g. a real dev question mentioning a "kid" or a school project.
+    ok, reason = guard.screen_post(
+        "school project bug",
+        "My 10 years old built this with Scratch, the sprite collision is off.",
+    )
+    assert ok is True
+    assert reason == ""
+
+
+def test_sexual_content_alone_allowed():
+    # Sexual-content term with no minor indicator must NOT trip the gate --
+    # e.g. a real question about an adult-content moderation feature.
+    ok, reason = guard.screen_post(
+        "content moderation flag",
+        "Need to classify explicit/nude images for an adult-content upload filter.",
+    )
+    assert ok is True
+    assert reason == ""
+
+
+def test_content_judge_noop_when_disabled(monkeypatch):
+    monkeypatch.setattr(config, "CONTENT_JUDGE_ENABLED", False)
+    blocked, reason = guard._hate_harassment_judge("anything at all")
+    assert blocked is False
+    assert reason == ""
