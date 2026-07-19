@@ -38,3 +38,13 @@ def test_final_rank_prefers_closer_and_higher_score():
     close_high = ranking.final_rank(0.1, 10, iso, now)
     far_low = ranking.final_rank(0.9, 0, iso, now)
     assert close_high > far_low
+
+
+def test_min_similarity_sits_between_observed_hit_and_miss_bands():
+    # Calibrated 2026-07-18 against a real pilot: true matches scored
+    # 0.76-0.87, confirmed non-matches scored 0.57-0.67. The floor must sit
+    # strictly between both observed bands or it isn't doing its job.
+    observed_true_matches = [0.76, 0.79, 0.84, 0.86, 0.87]
+    observed_false_positives = [0.57, 0.60, 0.66, 0.67]
+    assert all(s >= ranking.MIN_SIMILARITY for s in observed_true_matches)
+    assert all(s < ranking.MIN_SIMILARITY for s in observed_false_positives)

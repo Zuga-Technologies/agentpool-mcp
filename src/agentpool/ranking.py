@@ -10,6 +10,17 @@ W_RECENCY = 0.1
 
 RECENCY_HALFLIFE_DAYS = 30.0
 
+# Empirically calibrated 2026-07-18 against a real pilot benchmark: true
+# topical matches on a paraphrased query scored 0.76-0.87 similarity; genuine
+# non-matches (confirmed by manual inspection, e.g. an npm dependency query
+# top-matching an unrelated Railway entry) scored 0.57-0.67. 0.70 sits clearly
+# between the two observed bands. With a small pool, knn() always returns its
+# k nearest neighbors regardless of whether any are actually relevant -- below
+# this floor we say "no confident match" instead of forcing a guess that looks
+# exactly like a real answer. Revisit as the pool grows past a handful of
+# entries and there's more data on where the bands actually sit.
+MIN_SIMILARITY = 0.70
+
 
 def voter_weight(tier: str) -> int:
     return TIER_WEIGHT.get(tier, 1)

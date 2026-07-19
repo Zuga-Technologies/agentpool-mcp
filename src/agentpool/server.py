@@ -94,6 +94,8 @@ def ask_pool(problem: str, tags: list[str] = [], k: int = 5) -> str:
             if row is None or row["status"] != "active":
                 continue
             sim = ranking.similarity_from_distance(dist)
+            if sim < ranking.MIN_SIMILARITY:
+                continue  # closest available != actually relevant, don't fake a match
             rank = ranking.final_rank(dist, row["score"], row["created_at"])
             ranked.append((dict(row), sim, rank))
         ranked.sort(key=lambda t: t[2], reverse=True)
@@ -431,6 +433,9 @@ async def cq_query_units(request: Request) -> JSONResponse:
                 r = rows.get(cid)
                 if r is None or r["status"] != "active":
                     continue
+                sim = ranking.similarity_from_distance(dist)
+                if sim < ranking.MIN_SIMILARITY:
+                    continue  # same floor as ask_pool -- don't wire out weak guesses
                 ranked.append(
                     (dict(r), ranking.final_rank(dist, r["score"], r["created_at"]))
                 )
