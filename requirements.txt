@@ -8,3 +8,4 @@ onnxruntime==1.26.0
 numpy==1.26.4
 sqlite-vec==0.1.9
 zugashield>=1.0.2,<1.1
+anthropic==0.117.0
