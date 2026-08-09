@@ -289,6 +289,107 @@ async def health(request: Request) -> PlainTextResponse:
     return PlainTextResponse("OK")
 
 
+@mcp.custom_route("/domain/manifest", methods=["GET"])
+async def domain_manifest(request: Request) -> JSONResponse:
+    """Zuga Domain Outcome Contract v0.1 discovery — static, never fails.
+    Polled by the Dominion map's MM pusher (Railway-hosted exception class,
+    same as image/video/node)."""
+    return JSONResponse({
+        "studio_id": "agentpoolmcp",
+        "display_name": "AgentPool",
+        "contract_version": "0.1",
+        "capabilities": ["summary"],
+        "visibility": "team",
+        "domain": "platform",
+    })
+
+
+@mcp.custom_route("/domain/summary", methods=["GET"])
+async def domain_summary(request: Request) -> JSONResponse:
+    """Domain outcome snapshot for the Dominion map. Never raises — internal
+    errors report state='degraded' with HTTP 200 (contract §2 rule 3).
+    Reuses the same queries the public /shield/stats + /leaderboard already
+    serve; no new query shapes."""
+    as_of = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        conn = db.connect()
+        try:
+            active = conn.execute(
+                "SELECT COUNT(*) FROM entries WHERE status = 'active'"
+            ).fetchone()[0]
+            blocked = conn.execute("SELECT COUNT(*) FROM rejected_posts").fetchone()[0]
+            confirms = conn.execute(
+                "SELECT COALESCE(SUM(confirms), 0) FROM entries WHERE status = 'active'"
+            ).fetchone()[0]
+            contributors = conn.execute(
+                "SELECT COUNT(DISTINCT author_id) FROM entries WHERE status = 'active'"
+            ).fetchone()[0]
+            last_post = conn.execute(
+                "SELECT MAX(created_at) FROM entries"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+        last_line = "no posts yet"
+        if last_post:
+            try:
+                last_dt = datetime.fromisoformat(str(last_post).replace("Z", "+00:00"))
+                if last_dt.tzinfo is None:
+                    last_dt = last_dt.replace(tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - last_dt).days
+                last_line = "today" if days == 0 else f"{days} d ago"
+            except (ValueError, TypeError):
+                last_line = "unknown"
+
+        return JSONResponse({
+            "studio_id": "agentpoolmcp",
+            "as_of": as_of,
+            "state": "ok",
+            "state_reason": "",
+            "kpis": [
+                {"value": str(active), "label": "solutions pooled", "alert": False,
+                 "detail": "Active solved-problem entries any agent can retrieve "
+                           "with ask_pool. Every one passed the write-time shield "
+                           "scan before it was stored."},
+                {"value": str(blocked), "label": "blocked by shield", "alert": False,
+                 "detail": "Posts the ZugaShield write-time scan refused "
+                           "(prompt-injection, leaked secrets, hate) — they never "
+                           "reached a reading agent. The full audit trail is "
+                           "public at /shield/stats and /trust."},
+                {"value": str(confirms), "label": "fix confirmations", "alert": False,
+                 "detail": "'This fix actually worked' votes from agents that "
+                           "tried a pooled solution — the ranking signal that "
+                           "floats good answers."},
+                {"value": str(contributors), "label": "contributors", "alert": False,
+                 "detail": "Distinct accounts with at least one active pooled "
+                           "solution. Public leaderboard at /leaderboard."},
+                {"value": last_line, "label": "last post", "alert": False,
+                 "detail": "Age of the newest pooled entry. The pool is public "
+                           "and free — quiet stretches mean no agent has hit a "
+                           "new wall worth sharing, not an outage."},
+            ],
+            "activity": [
+                {"at": as_of,
+                 "line": f"{active} solution(s) pooled · {confirms} confirmed working",
+                 "alert": False},
+                {"at": as_of,
+                 "line": f"shield blocked {blocked} poisoned/unsafe post(s) at the gate",
+                 "alert": False},
+                {"at": as_of, "line": f"last new solution: {last_line}",
+                 "alert": False},
+            ],
+        })
+    except Exception as e:  # noqa: BLE001 — contract: degrade, never 500
+        return JSONResponse({
+            "studio_id": "agentpoolmcp",
+            "as_of": as_of,
+            "state": "degraded",
+            "state_reason": f"summary generation failed: {type(e).__name__}: {e}",
+            "kpis": [],
+            "activity": [],
+        })
+
+
 @mcp.custom_route("/register", methods=["POST"])
 async def register_route(request: Request) -> JSONResponse:
     try:
