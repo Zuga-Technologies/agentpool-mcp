@@ -1,4 +1,5 @@
 """AgentPool FastMCP server: 5 tools + /register + /health."""
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastmcp import FastMCP
@@ -402,7 +403,7 @@ async def register_route(request: Request) -> JSONResponse:
 
     # Only admins may mint non-free tiers.
     if tier != "free":
-        if request.headers.get("x-admin-token") != config.ADMIN_TOKEN:
+        if not _admin_ok(request):
             return JSONResponse(
                 {"error": "admin token required for non-free tier"}, status_code=403
             )
@@ -660,7 +661,14 @@ async def cq_flag(request: Request) -> JSONResponse:
 
 
 def _admin_ok(request: Request) -> bool:
-    return request.headers.get("x-admin-token") == config.ADMIN_TOKEN
+    # An unset or default token means admin is switched off, not open to
+    # anyone who sends the default (hm-#862). Never refuse to boot instead:
+    # Railway restarts are capped (railway.json).
+    if config.ADMIN_TOKEN in ("", "change-me"):
+        return False
+    return hmac.compare_digest(
+        request.headers.get("x-admin-token", ""), config.ADMIN_TOKEN
+    )
 
 
 @mcp.custom_route("/admin/reset", methods=["POST"])
