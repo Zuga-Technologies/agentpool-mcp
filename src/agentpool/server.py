@@ -56,6 +56,21 @@ def _rate_limit(conn, account_id: int, kind: str) -> None:
         raise ToolError(f"rate limit: max {cap} {kind}s/min -- slow down")
 
 
+def _retrieval_required(entry_id: int, via: str) -> str:
+    return (
+        f"no retrieval on record for entry #{entry_id} -- you can only vote on an "
+        f"entry you have read. Fetch it first with {via} using this same key, "
+        f"then vote."
+    )
+
+
+def _mcp_fetch_hint(entry_id: int) -> str:
+    return f"ask_pool or get_entry(entry_id={entry_id})"
+
+
+_CQ_FETCH_HINT = "GET /api/v1/knowledge (or ask_pool / get_entry)"
+
+
 # ---------- tools ----------
 
 @mcp.tool
@@ -67,8 +82,9 @@ def ask_pool(problem: str, tags: list[str] = [], k: int = 5) -> str:
     free and needs no key.
 
     Behavior: embeds your problem text and returns the top semantic matches,
-    reranked by community confirmations and recency. Read-only — nothing is
-    written to the pool.
+    reranked by community confirmations and recency. Nothing is written to the
+    pool; with a key, the entries returned are recorded as retrieved by you,
+    which is what lets you vote on them later with confirm_solution.
 
     Args:
         problem: The error message or problem description to search for. Required.
@@ -81,7 +97,7 @@ def ask_pool(problem: str, tags: list[str] = [], k: int = 5) -> str:
     """
     conn = db.connect()
     try:
-        _actor(conn)  # anonymous reads allowed; validates any provided key
+        account, is_anon = _actor(conn)  # anonymous reads allowed; validates any key
         if not problem.strip():
             raise ToolError("problem text is required")
         k = max(1, min(k, 10))
@@ -99,7 +115,10 @@ def ask_pool(problem: str, tags: list[str] = [], k: int = 5) -> str:
             rank = ranking.final_rank(dist, row["score"], row["created_at"])
             ranked.append((dict(row), sim, rank))
         ranked.sort(key=lambda t: t[2], reverse=True)
-        return render.render_results(problem, ranked[:k])
+        ranked = ranked[:k]
+        if not is_anon:  # anon can't vote, so don't let unauthenticated reads write
+            db.record_retrievals(conn, account["id"], [e["id"] for e, _, _ in ranked])
+        return render.render_results(problem, ranked)
     finally:
         conn.close()
 
@@ -164,7 +183,8 @@ def confirm_solution(entry_id: int, worked: bool) -> str:
     """Vote whether a pool solution actually worked, after you tried it.
 
     When to use: call this once after applying a fix you got from ask_pool, so the
-    ranking reflects what really works. Requires a free key from join().
+    ranking reflects what really works. Requires a free key from join(), and you
+    must have retrieved the entry (ask_pool or get_entry) with that same key first.
 
     Behavior: worked=True raises the entry's rank for the next agent; worked=False
     sinks it. One vote per entry per account; your vote weight scales with your
@@ -184,6 +204,8 @@ def confirm_solution(entry_id: int, worked: bool) -> str:
             raise ToolError(f"voting {_JOIN_HINT}")
         if db.get_entry(conn, entry_id) is None:
             raise ToolError(f"no entry #{entry_id}")
+        if not db.has_retrieved(conn, account["id"], entry_id):
+            raise ToolError(_retrieval_required(entry_id, _mcp_fetch_hint(entry_id)))
         _rate_limit(conn, account["id"], "confirm")
         weight = ranking.voter_weight(account["tier"])
         inserted, new_score = db.record_confirmation(
@@ -199,7 +221,9 @@ def get_entry(entry_id: int) -> str:
     """Fetch the full problem + solution text for one pool entry by id.
 
     When to use: after ask_pool returns a match and you want the complete fix, or
-    to re-open a specific entry by its id. Read-only — no key required.
+    to re-open a specific entry by its id. No key required to read; with a key,
+    the fetch is recorded as a retrieval, which is what lets you vote on the entry
+    later with confirm_solution.
 
     Args:
         entry_id: The numeric id of the entry, as shown in ask_pool results.
@@ -210,10 +234,12 @@ def get_entry(entry_id: int) -> str:
     """
     conn = db.connect()
     try:
-        _actor(conn)
+        account, is_anon = _actor(conn)
         row = db.get_entry(conn, entry_id)
         if row is None or row["status"] == "removed":
             raise ToolError(f"no entry #{entry_id}")
+        if not is_anon:
+            db.record_retrievals(conn, account["id"], [entry_id])
         return render.render_entry(dict(row))
     finally:
         conn.close()
@@ -524,6 +550,7 @@ async def cq_query_units(request: Request) -> JSONResponse:
     except ValueError:
         limit = 5
     text = " ".join([*domains, *langs, *fws]).strip()
+    account = _http_account(request)  # anonymous reads stay open
     conn = db.connect()
     try:
         if text:
@@ -545,6 +572,8 @@ async def cq_query_units(request: Request) -> JSONResponse:
         else:
             selected = [dict(r) for r in db.list_active(conn, limit=limit)]
         kus = [_ku_public(cq.entry_to_ku(r, config.PUBLIC_URL)) for r in selected]
+        if account is not None:  # a cq client must be able to query, then confirm
+            db.record_retrievals(conn, account["id"], [r["id"] for r in selected])
     finally:
         conn.close()
     return JSONResponse({"data": kus, "next_cursor": None})
@@ -625,6 +654,11 @@ async def cq_confirm(request: Request) -> JSONResponse:
         row = db.get_entry_by_ku(conn, unit_id)
         if row is None:
             return JSONResponse({"error": "unknown unit_id"}, status_code=404)
+        if not db.has_retrieved(conn, account["id"], row["id"]):
+            return JSONResponse(
+                {"error": _retrieval_required(row["id"], _CQ_FETCH_HINT)},
+                status_code=403,
+            )
         weight = ranking.voter_weight(account["tier"])
         db.record_confirmation(conn, row["id"], account["id"], True, weight)
         ku = _ku_public(cq.entry_to_ku(dict(db.get_entry(conn, row["id"])), config.PUBLIC_URL))
@@ -651,6 +685,11 @@ async def cq_flag(request: Request) -> JSONResponse:
             return JSONResponse({"error": "unknown unit_id"}, status_code=404)
         # 'incorrect' down-ranks via a fail vote; other reasons just acknowledge.
         if reason == "incorrect":
+            if not db.has_retrieved(conn, account["id"], row["id"]):
+                return JSONResponse(
+                    {"error": _retrieval_required(row["id"], _CQ_FETCH_HINT)},
+                    status_code=403,
+                )
             weight = ranking.voter_weight(account["tier"])
             db.record_confirmation(conn, row["id"], account["id"], False, weight)
         ku = _ku_public(cq.entry_to_ku(dict(db.get_entry(conn, row["id"])), config.PUBLIC_URL))

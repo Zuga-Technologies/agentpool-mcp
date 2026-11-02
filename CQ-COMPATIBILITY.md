@@ -46,6 +46,11 @@ FastAPI source (`server/backend/src/cq_server/api/routes/knowledge.py`):
    `Authorization: Bearer <key>` header cq tooling sends (in addition to
    `X-API-Key`), and confirm/flag return the updated KU (not an ad-hoc payload).
 
+**Vote gate:** `confirmations` (and a `flags` call with reason `incorrect`, which is a
+fail vote) return 403 unless the same key has retrieved that unit first, via
+`GET /api/v1/knowledge` with the key sent, or `ask_pool` / `get_entry` over MCP.
+Anonymous queries stay open but record nothing.
+
 **Auth:** AgentPool accepts both `X-API-Key: <key>` (native) and
 `Authorization: Bearer <key>` (cq tooling / `CQ_API_KEY`).
 
