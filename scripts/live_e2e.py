@@ -105,6 +105,18 @@ async def main() -> int:
         assert "tailwind" in found.data.lower(), "posted entry not found by search"
 
     async with client_for(b["api_key"]) as cb:
+        # a vote needs a prior retrieval by the same key: voting blind is rejected
+        blind_blocked = False
+        try:
+            await cb.call_tool("confirm_solution", {"entry_id": entry_id, "worked": True})
+        except Exception as e:
+            blind_blocked = "retrieval" in str(e).lower()
+        print("[blind vote rejected, told to retrieve first]:", blind_blocked)
+        assert blind_blocked, "voting without a prior retrieval should be rejected"
+
+        got = await cb.call_tool("get_entry", {"entry_id": entry_id})
+        assert "tailwind" in got.data.lower(), "get_entry did not return the posted entry"
+
         confirmed = await cb.call_tool(
             "confirm_solution", {"entry_id": entry_id, "worked": True}
         )

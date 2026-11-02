@@ -69,6 +69,15 @@ def init_db(conn: sqlite3.Connection) -> None:
             UNIQUE(entry_id, account_id)
         );
 
+        -- Which entries each account has been shown (ask_pool / get_entry / cq
+        -- query). A vote is only accepted for an entry the voter has retrieved.
+        CREATE TABLE IF NOT EXISTS retrievals (
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            entry_id   INTEGER NOT NULL REFERENCES entries(id),
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (account_id, entry_id)
+        );
+
         CREATE VIRTUAL TABLE IF NOT EXISTS entries_vec USING vec0(
             embedding float[{EMBED_DIM}] distance_metric=cosine
         );
@@ -306,6 +315,30 @@ def knn(conn, query_vec: list[float], n: int) -> list[tuple[int, float]]:
     return [(r["rowid"], r["distance"]) for r in rows]
 
 
+# ---------- retrievals ----------
+
+def record_retrievals(conn, account_id: int, entry_ids: list[int]) -> None:
+    """Remember that `account_id` was shown these entries (idempotent)."""
+    if not entry_ids:
+        return
+    now = _now()
+    conn.executemany(
+        "INSERT OR IGNORE INTO retrievals (account_id, entry_id, created_at) VALUES (?,?,?)",
+        [(account_id, eid, now) for eid in entry_ids],
+    )
+    conn.commit()
+
+
+def has_retrieved(conn, account_id: int, entry_id: int) -> bool:
+    return (
+        conn.execute(
+            "SELECT 1 FROM retrievals WHERE account_id = ? AND entry_id = ?",
+            (account_id, entry_id),
+        ).fetchone()
+        is not None
+    )
+
+
 # ---------- confirmations ----------
 
 def record_confirmation(
@@ -388,6 +421,7 @@ def purge_handle(conn, handle: str) -> dict | None:
     votes_deleted = conn.execute(
         "DELETE FROM confirmations WHERE account_id = ?", (account_id,)
     ).rowcount
+    conn.execute("DELETE FROM retrievals WHERE account_id = ?", (account_id,))
     if total_posts == 0:
         conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
         outcome = "deleted"
@@ -409,6 +443,7 @@ def purge_all(conn) -> dict:
 
     counts = {
         "confirmations": conn.execute("DELETE FROM confirmations").rowcount,
+        "retrievals": conn.execute("DELETE FROM retrievals").rowcount,
         "entries_vec": conn.execute("DELETE FROM entries_vec").rowcount,
         "entries": conn.execute("DELETE FROM entries").rowcount,
         "accounts": conn.execute(
